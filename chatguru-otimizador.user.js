@@ -1,13 +1,12 @@
 // ==UserScript==
-// @name         ChatGuru Turbo
-// @namespace    chatguru-turbo
-// @version      2.1.0
-// @description  Deixa o ChatGuru leve: agrupa os eventos do Pusher, limita a lista de chats, desacelera com a aba oculta, Vue em modo produção, bloqueia rastreadores.
-// @match        https://*.chatguru.app/*
-// @match        https://chatguru.app/*
-// @run-at       document-start
+// @name         ChatGuru - Ligar Otimizador
+// @namespace    ChatGuru - Ligar Otimizador
+// @version      1.0
+// @match        https://s12.chatguru.app/*
 // @grant        none
-// @noframes
+// @run-at       document-idle
+// @updateURL    https://raw.githubusercontent.com/Ante-Deguemon/BINDS-CONSULTORES-GL-5.0/main/chatguru-otimizador.user.js
+// @downloadURL  https://raw.githubusercontent.com/Ante-Deguemon/BINDS-CONSULTORES-GL-5.0/main/chatguru-otimizador.user.js
 // ==/UserScript==
 
 (function () {
