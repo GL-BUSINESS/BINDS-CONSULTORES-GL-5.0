@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGuru - Ligar Otimizador
 // @namespace    ChatGuru - Ligar Otimizador
-// @version      1.0
+// @version      1.1
 // @match        https://s12.chatguru.app/*
 // @grant        none
 // @run-at       document-idle
@@ -17,7 +17,7 @@
     return;
   }
 
-  const VERSION = '2.1.0';
+  const VERSION = '2.1.1';
   const TAG = '[CG-Turbo]';
 
   // ============================ CONFIGURAÇÃO ============================
@@ -41,6 +41,7 @@
     lazyCards: true,          // cards fora da tela não são desenhados
     lazyImages: true,         // avatares da lista só carregam quando aparecem
     debounceResizeMs: 150,    // redimensionar a janela recalcula o layout 1x em vez de dezenas (0 = desliga)
+    fixScroll: true,          // a página e o contêiner das colunas não rolam no lugar da lista
     log: true,
   };
   // limites aceitos para os números (valores fora são corrigidos)
@@ -84,7 +85,7 @@
     events: 0, flushes: 0, applied: 0, badEvents: 0, flushMs: 0, flushByMode: {}, sched: 'active',
     dropped: 0, trimmed: 0, trimSkipped: 0, maxSeenCards: 0, pageBumps: 0, reconnects: 0,
     dateHits: 0, dateMiss: 0, lazyImgs: 0, resizesHeld: 0, resizesFired: 0,
-    instRebuilds: 0, indexFixed: 0, forwardSyncs: 0,
+    instRebuilds: 0, indexFixed: 0, forwardSyncs: 0, scrollFixes: 0,
   };
   const api = {
     CFG, stats,
@@ -337,6 +338,67 @@
           window.dispatchEvent(ev);
         }, CFG.debounceResizeMs);
       }, true);
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // 5b. Rolagem no contêiner errado
+  //    A tela de chats cabe na janela (o app calcula as alturas), mas às vezes a
+  //    página inteira ou o contêiner das três colunas fica rolado: o topo dos
+  //    filtros some e sobra uma faixa vazia embaixo da conversa.
+  //    (a) a lista/conversa que chega ao fim não repassa a rolagem para a página;
+  //    (b) se a página ou um contêiner overflow:hidden acima da lista rolar
+  //        mesmo assim, volta para 0.
+  // ---------------------------------------------------------------------
+  if (CFG.fixScroll) {
+    safe('scroll:css', () => whenHead(() => {
+      const style = document.createElement('style');
+      style.id = 'cg-turbo-scroll-css';
+      style.textContent = 'html:has(#cg-chatlist) body *{overscroll-behavior:contain;}';
+      document.head.appendChild(style);
+    }));
+    safe('scroll:guard', () => {
+      let cacheList = null;
+      let cache = new WeakMap(); // elemento -> deve ficar sem rolagem?
+      const isLayoutClip = (el, list) => {
+        if (cacheList !== list) { cacheList = list; cache = new WeakMap(); }
+        let v = cache.get(el);
+        if (v === undefined) {
+          const st = getComputedStyle(el);
+          const clip = (o) => o === 'hidden' || o === 'clip';
+          v = el.contains(list) && (clip(st.overflowY) || clip(st.overflowX));
+          cache.set(el, v);
+        }
+        return v;
+      };
+      let pending = null;
+      const reset = (el) => {
+        if (pending && pending.indexOf(el) >= 0) return;
+        if (!pending) {
+          pending = [];
+          requestAnimationFrame(() => {
+            const els = pending; pending = null;
+            for (const x of els) {
+              if (!x.scrollTop && !x.scrollLeft) continue;
+              x.scrollTop = 0; x.scrollLeft = 0;
+              if (!stats.scrollFixes) log('rolagem fora do lugar corrigida em', x);
+              stats.scrollFixes++;
+            }
+          });
+        }
+        pending.push(el);
+      };
+      document.addEventListener('scroll', (e) => {
+        const list = document.getElementById('cg-chatlist');
+        if (!list) return; // outras telas do ChatGuru rolam a página normalmente
+        const t = e.target;
+        if (t === document || t === document.documentElement || t === document.body) {
+          reset(document.scrollingElement || document.documentElement);
+          if (document.body) reset(document.body);
+        } else if (t && t.nodeType === 1 && isLayoutClip(t, list)) {
+          reset(t);
+        }
+      }, { capture: true, passive: true });
     });
   }
 
