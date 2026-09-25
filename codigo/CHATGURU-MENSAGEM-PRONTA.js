@@ -1,6 +1,6 @@
 // CHATGURU-MENSAGEM-PRONTA — o código de verdade do userscript CHATGURU-MENSAGEM-PRONTA.user.js, que agora é só o carregador.
-// Editou aqui: rode `python3 assinar.py` no s2 e suba codigo/ na main. Sem assinatura, os
-// PCs seguem na versão anterior. Roda no escopo da página do ChatGuru.
+// Editou aqui e subiu na main: vale no próximo F5 de todo mundo, sem mexer no @version.
+// Roda no escopo da página do ChatGuru.
 
 (function () {
   'use strict';
