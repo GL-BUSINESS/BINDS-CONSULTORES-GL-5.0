@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGuru – mensagem pronta
 // @namespace    glcapital
-// @version      3.1
+// @version      3.2
 // @description  F2 abre o menu das mensagens prontas cadastradas no painel (Tampermonkeys › Mensagens do F2)
 // @match        https://s12.chatguru.app/*
 // @run-at       document-idle
@@ -118,8 +118,16 @@
     return '';
   }
 
+  // O cabeçalho do chat aberto: <span id="chat_name">NOME DO LEAD</span> — o nome como o
+  // ChatGuru mostra agora (elemento conferido no ChatGuru pelo dono em 25/09/2026).
+  function nomeNoCabecalho() {
+    const cabecalho = document.getElementById('chat_name');
+    const v = cabecalho ? cabecalho.textContent.replace(/\s+/g, ' ').trim() : '';
+    return v && !pareceTelefone(v) ? v.slice(0, 80) : '';
+  }
+
   function nomeDoLead(chatId) {
-    return nomeNoApp(chatId) || nomeNaTela(chatId);
+    return nomeNoCabecalho() || nomeNoApp(chatId) || nomeNaTela(chatId);
   }
 
   // Plano B: o texto do cartão do chat aberto, na lista da esquerda.
