@@ -2,84 +2,130 @@
 // Editou aqui e subiu na main: vale no próximo F5 de todo mundo, sem mexer no @version.
 // Roda no escopo da página do ChatGuru.
 
-(function() {
+(function () {
     'use strict';
 
-    // =========================================================================
-    // CONFIGURAÇÃO DOS ATALHOS PADRÕES (IGUAL PARA TODOS OS CONSULTORES)
-    // =========================================================================
-    const CONFIGURACAO_ATALHOS = {
-        'F3':  [''], // 
-        'F4':  [''], // 
-        'F6':  [''], // 
-        'F7':  [''], // 
-        'F8':  ['69692a94bd22fdc5f4a312c9'], // CONFIRMAR PGTO
-        'F9':  ['69610f0979048dcd4033d958'], // FORM CLT
-        'F10': [''], // NÃO MAPEADO
-        'F11': [''], // NÃO MAPEADO
-        'F12': [''], // NÃO MAPEADO
-    };
+    // Os atalhos desta equipe NÃO moram aqui: são cadastrados no painel-dev (Tampermonkeys ›
+    // Atalhos dos BINDS) e lidos sem login ao abrir o ChatGuru e a cada 2 minutos.
+    const EQUIPE = 'clt_operacional';
+    const LISTA_URL = 'https://gateway-s2.glcapital-ti.net/binds-atalhos';
+    const RELER_MS = 2 * 60 * 1000;
+    // A última lista boa: vale desde a abertura e segura os atalhos se o painel cair
+    const CACHE_KEY = `gl_binds_${EQUIPE}`;
+    // O diálogo de apresentação é de cada consultor, guardado neste navegador
+    const APRESENTACAO_KEY = 'id_apresentacao_consultor';
+    const DIALOGO_ID = /^[0-9a-f]{24}$/i;
 
-    // =========================================================================
-    // CONFIGURAÇÃO DA TECLA DE APRESENTAÇÃO INDIVIDUAL
-    // =========================================================================
-    const TECLA_APRESENTACAO = 'F2'; // Tecla que cada um usará para sua apresentação
-    // =========================================================================
+    function lerLocal(chave) {
+        try { return localStorage.getItem(chave); } catch (e) { return null; }
+    }
+    function gravarLocal(chave, valor) {
+        try { localStorage.setItem(chave, valor); } catch (e) { /* sem storage: só não guarda */ }
+    }
 
+    let config = (() => {
+        try { return JSON.parse(lerLocal(CACHE_KEY)) || null; } catch (e) { return null; }
+    })() || { apresentacao: null, atalhos: [] };
+
+    async function buscar() {
+        const ctl = new AbortController();
+        const prazo = setTimeout(() => ctl.abort(), 5000);
+        try {
+            const r = await fetch(LISTA_URL, { cache: 'no-store', credentials: 'omit', signal: ctl.signal });
+            const j = await r.json();
+            const minha = j && j.ok && j.equipes && j.equipes[EQUIPE];
+            if (!minha || !Array.isArray(minha.atalhos)) throw new Error(`HTTP ${r.status}`);
+            config = minha;
+            gravarLocal(CACHE_KEY, JSON.stringify(config));
+        } catch (e) {
+            console.warn(`[binds ${EQUIPE}] não li os atalhos do painel`, e);
+        } finally {
+            clearTimeout(prazo);
+        }
+    }
 
     function dispararClique(seletor) {
         if (typeof $ !== 'undefined') {
             var jqBtn = $(seletor);
-            if (jqBtn.length > 0) { jqBtn.click(); return true; }
+            if (jqBtn.length > 0) {
+                jqBtn.click();
+                return true;
+            }
         }
         var jsBtn = document.querySelector(seletor);
-        if (jsBtn) { jsBtn.click(); return true; }
+        if (jsBtn) {
+            jsBtn.click();
+            return true;
+        }
         return false;
     }
 
-    document.addEventListener('keydown', function(e) {
-        const teclaPressionada = e.key.toUpperCase();
+    // Monta o nome da tecla no mesmo formato do painel.
+    // Ex.: "F7", "CTRL+'", "ALT+G"
+    function nomeDaTecla(e) {
+        var base = e.key.toUpperCase();
 
-        // 1. LÓGICA DA APRESENTAÇÃO PESSOAL (ID INDIVIDUAL)
-        if (teclaPressionada === TECLA_APRESENTACAO) {
-            e.preventDefault();
-            e.stopPropagation();
+        // A apostrofe muda de lugar conforme o teclado (ABNT2 usa a tecla ao lado
+        // do 1, US usa a do lado do ENTER) e as vezes chega como "Dead".
+        // Tratamos apostrofe e aspas como a mesma tecla.
+        if (base === "'" || base === '"' ||
+            (base === 'DEAD' && (e.code === 'Quote' || e.code === 'Backquote'))) {
+            base = "'";
+        }
 
-            // Tenta pegar o ID que está salvo no computador do funcionário
-            let idPessoal = localStorage.getItem('id_apresentacao_consultor');
+        var prefixo = '';
+        if (e.ctrlKey || e.metaKey) prefixo += 'CTRL+';
+        if (e.altKey) prefixo += 'ALT+';
 
-            // Se não tiver nenhum ID salvo ainda...
-            if (!idPessoal) {
-                // Abre a caixinha perguntando o ID
-                idPessoal = prompt("Configuração Inicial:\nCole aqui o seu ID de Diálogo de Apresentação Pessoal:");
-                
-                if (idPessoal) {
-                    idPessoal = idPessoal.trim();
-                    // Salva no navegador para nunca mais pedir
-                    localStorage.setItem('id_apresentacao_consultor', idPessoal);
-                    alert("ID Salvo com sucesso! Aperte a tecla novamente para testar.");
-                }
-                return;
+        return prefixo + base;
+    }
+
+    function apresentacaoPessoal() {
+        // Tenta pegar o ID que está salvo no computador do funcionário
+        let idPessoal = lerLocal(APRESENTACAO_KEY);
+
+        // Se não tiver nenhum ID salvo ainda...
+        if (!idPessoal) {
+            // Abre a caixinha perguntando o ID
+            idPessoal = prompt("Configuração Inicial:\nCole aqui o seu ID de Diálogo de Apresentação Pessoal:");
+
+            if (idPessoal) {
+                idPessoal = idPessoal.trim();
+                // Salva no navegador para nunca mais pedir
+                gravarLocal(APRESENTACAO_KEY, idPessoal);
+                alert("ID Salvo com sucesso! Aperte a tecla novamente para testar.");
             }
-
-            // Se já tem o ID salvo, faz o clique normal
-            var selectorPessoal = 'button[data-dialog-id="' + idPessoal + '"]';
-            dispararClique(selectorPessoal);
             return;
         }
 
-        // 2. LÓGICA DOS ATALHOS PADRÕES DO GITHUB
-        if (CONFIGURACAO_ATALHOS.hasOwnProperty(teclaPressionada)) {
+        // Se já tem o ID salvo, faz o clique normal
+        dispararClique('button[data-dialog-id="' + CSS.escape(idPessoal) + '"]');
+    }
+
+    document.addEventListener('keydown', function (e) {
+        const tecla = nomeDaTecla(e);
+
+        if (config.apresentacao && tecla === config.apresentacao) {
             e.preventDefault();
             e.stopPropagation();
-
-            const listaIds = CONFIGURACAO_ATALHOS[teclaPressionada];
-            if (listaIds[0] === '') return;
-
-            for (var i = 0; i < listaIds.length; i++) {
-                var selector = 'button[data-dialog-id="' + listaIds[i] + '"]';
-                if (dispararClique(selector)) break;
-            }
+            if (!e.repeat) apresentacaoPessoal();
+            return;
         }
-    }, true);
+
+        const atalho = config.atalhos.find(a => a.tecla === tecla);
+        if (!atalho) return;   // tecla sem atalho: passa normal
+
+        // Bloqueia o comando do Chrome (o F6 iria para a barra de endereço, o F1 abriria a ajuda)
+        e.preventDefault();
+        e.stopPropagation();
+        // Tecla segurada não dispara o diálogo de novo: cada disparo é mensagem ao lead
+        if (e.repeat) return;
+
+        for (const id of atalho.dialogos || []) {
+            if (DIALOGO_ID.test(id) && dispararClique('button[data-dialog-id="' + id + '"]')) break;
+        }
+    }, true); // O "true" aqui faz o script ouvir a tecla antes de qualquer outra coisa na página
+
+    buscar();
+    setInterval(buscar, RELER_MS);
 })();

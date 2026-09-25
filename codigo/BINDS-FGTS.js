@@ -2,29 +2,47 @@
 // Editou aqui e subiu na main: vale no próximo F5 de todo mundo, sem mexer no @version.
 // Roda no escopo da página do ChatGuru.
 
-(function() {
+(function () {
     'use strict';
 
-    // =========================================================================
-    //
-    //                           PROIBIDO ALTERAR POR CONTA PROPRIA!
-    //
-    // =========================================================================
-    const CONFIGURACAO_ATALHOS = {
-        'F1':  ['6a6d66fd26c72b9fbafd66ee'], // delegar clt
-        'F2':  ['6a6cd569df27400876c417c9'], // fluxo fgts
-        'F3':  ['6a6cd577df27400876c417fc'], // Envio manual consultores
-        'F4':  ['6a3064a215997fc4040dfe15'], // Inicio Atendimento
-        'F6':  ['69dce931939d5d56e962fed1'], // fechar atend
-        'F7':  ['65f9b93c0962dc56032327ce'],  // sem saldo 21
-        'F8':  ['660eed83b644ff84d9cfe4a9'],  // cont atend
-        'F9':  ['67d2d40f754db923f517fb7f'],  // detalhado ns
-        'F10': ['699721ee8320bfb90ed2464a'],  // aniversário
-        'F11': ['69fcb8274c65297d14982a0a'], // depois de passar valor
-        'F12': ['69205d691b9474ab13c568d3'],  // audio fgts negado
-        "CTRL+'": ['6a18695f48bb99c330346eb8'],   // ainda não aut
-    };
-    // =========================================================================
+    // Os atalhos desta equipe NÃO moram aqui: são cadastrados no painel-dev (Tampermonkeys ›
+    // Atalhos dos BINDS) e lidos sem login ao abrir o ChatGuru e a cada 2 minutos.
+    const EQUIPE = 'fgts';
+    const LISTA_URL = 'https://gateway-s2.glcapital-ti.net/binds-atalhos';
+    const RELER_MS = 2 * 60 * 1000;
+    // A última lista boa: vale desde a abertura e segura os atalhos se o painel cair
+    const CACHE_KEY = `gl_binds_${EQUIPE}`;
+    // O diálogo de apresentação é de cada consultor, guardado neste navegador
+    const APRESENTACAO_KEY = 'id_apresentacao_consultor';
+    const DIALOGO_ID = /^[0-9a-f]{24}$/i;
+
+    function lerLocal(chave) {
+        try { return localStorage.getItem(chave); } catch (e) { return null; }
+    }
+    function gravarLocal(chave, valor) {
+        try { localStorage.setItem(chave, valor); } catch (e) { /* sem storage: só não guarda */ }
+    }
+
+    let config = (() => {
+        try { return JSON.parse(lerLocal(CACHE_KEY)) || null; } catch (e) { return null; }
+    })() || { apresentacao: null, atalhos: [] };
+
+    async function buscar() {
+        const ctl = new AbortController();
+        const prazo = setTimeout(() => ctl.abort(), 5000);
+        try {
+            const r = await fetch(LISTA_URL, { cache: 'no-store', credentials: 'omit', signal: ctl.signal });
+            const j = await r.json();
+            const minha = j && j.ok && j.equipes && j.equipes[EQUIPE];
+            if (!minha || !Array.isArray(minha.atalhos)) throw new Error(`HTTP ${r.status}`);
+            config = minha;
+            gravarLocal(CACHE_KEY, JSON.stringify(config));
+        } catch (e) {
+            console.warn(`[binds ${EQUIPE}] não li os atalhos do painel`, e);
+        } finally {
+            clearTimeout(prazo);
+        }
+    }
 
     function dispararClique(seletor) {
         if (typeof $ !== 'undefined') {
@@ -42,7 +60,7 @@
         return false;
     }
 
-    // Monta o nome da tecla no mesmo formato usado na configuracao acima.
+    // Monta o nome da tecla no mesmo formato do painel.
     // Ex.: "F7", "CTRL+'", "ALT+G"
     function nomeDaTecla(e) {
         var base = e.key.toUpperCase();
@@ -62,31 +80,52 @@
         return prefixo + base;
     }
 
-    document.addEventListener('keydown', function(e) {
-        const teclaPressionada = nomeDaTecla(e);
+    function apresentacaoPessoal() {
+        // Tenta pegar o ID que está salvo no computador do funcionário
+        let idPessoal = lerLocal(APRESENTACAO_KEY);
 
-        if (CONFIGURACAO_ATALHOS.hasOwnProperty(teclaPressionada)) {
+        // Se não tiver nenhum ID salvo ainda...
+        if (!idPessoal) {
+            // Abre a caixinha perguntando o ID
+            idPessoal = prompt("Configuração Inicial:\nCole aqui o seu ID de Diálogo de Apresentação Pessoal:");
 
-            const listaIds = CONFIGURACAO_ATALHOS[teclaPressionada];
-
-            // Atalho ainda sem dialogo configurado: deixa a tecla passar normal.
-            if (listaIds[0] === '') {
-                return;
+            if (idPessoal) {
+                idPessoal = idPessoal.trim();
+                // Salva no navegador para nunca mais pedir
+                gravarLocal(APRESENTACAO_KEY, idPessoal);
+                alert("ID Salvo com sucesso! Aperte a tecla novamente para testar.");
             }
+            return;
+        }
 
-            // Bloqueia o comando do Chrome imediatamente.
-            // Isso impede o F6 de ir para a barra de endereco e o F1 de abrir ajuda.
+        // Se já tem o ID salvo, faz o clique normal
+        dispararClique('button[data-dialog-id="' + CSS.escape(idPessoal) + '"]');
+    }
+
+    document.addEventListener('keydown', function (e) {
+        const tecla = nomeDaTecla(e);
+
+        if (config.apresentacao && tecla === config.apresentacao) {
             e.preventDefault();
             e.stopPropagation();
+            if (!e.repeat) apresentacaoPessoal();
+            return;
+        }
 
-            for (var i = 0; i < listaIds.length; i++) {
-                var selector = 'button[data-dialog-id="' + listaIds[i] + '"]';
-                var clicouComSucesso = dispararClique(selector);
+        const atalho = config.atalhos.find(a => a.tecla === tecla);
+        if (!atalho) return;   // tecla sem atalho: passa normal
 
-                if (clicouComSucesso) {
-                    break;
-                }
-            }
+        // Bloqueia o comando do Chrome (o F6 iria para a barra de endereço, o F1 abriria a ajuda)
+        e.preventDefault();
+        e.stopPropagation();
+        // Tecla segurada não dispara o diálogo de novo: cada disparo é mensagem ao lead
+        if (e.repeat) return;
+
+        for (const id of atalho.dialogos || []) {
+            if (DIALOGO_ID.test(id) && dispararClique('button[data-dialog-id="' + id + '"]')) break;
         }
     }, true); // O "true" aqui faz o script ouvir a tecla antes de qualquer outra coisa na página
+
+    buscar();
+    setInterval(buscar, RELER_MS);
 })();
