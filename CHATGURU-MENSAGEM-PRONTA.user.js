@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGuru – mensagem pronta
 // @namespace    glcapital
-// @version      3.2
+// @version      3.3
 // @description  F2 abre o menu das mensagens prontas cadastradas no painel (Tampermonkeys › Mensagens do F2)
 // @match        https://s12.chatguru.app/*
 // @run-at       document-idle
@@ -102,6 +102,16 @@
   const CAMPOS_NOME = ['name', 'nome', 'chat_name', 'contact_name', 'nome_contato', 'display_name'];
   const pareceTelefone = s => /^\+?[\d\s().-]{8,}$/.test(s);
 
+  // O nome como pode ir ao lead, ou '' (o consultor digita). Contato novo chega ao ChatGuru como
+  // "Novo Contato! Nome:" — isso nunca vai: sobra só o nome que vier depois, se vier (pedido do
+  // dono em 25/09/2026). Telefone e texto sem letra também não são nome.
+  function limparNome(bruto) {
+    const v = String(bruto || '').replace(/\s+/g, ' ').trim()
+      .replace(/^novo contato\s*!?\s*(nome\s*:?)?\s*/i, '').trim();
+    if (!v || pareceTelefone(v) || !/\p{L}/u.test(v) || /novo contato/i.test(v)) return '';
+    return v.slice(0, 80);
+  }
+
   // O nome ATUAL do lead no ChatGuru: o objeto do chat na lista do app Vue do site
   // (window.testeVueJS.cards — o mesmo que o otimizador usa), que o site mantém em dia pelo
   // websocket; renomeou o chat, o próximo F2 já vem com o nome novo.
@@ -111,8 +121,8 @@
       const card = cards && cards.find && cards.find(c => c && String(c.id) === chatId);
       if (!card) return '';
       for (const k of CAMPOS_NOME) {
-        const v = typeof card[k] === 'string' ? card[k].trim() : '';
-        if (v && !pareceTelefone(v)) return v.slice(0, 80);
+        const v = typeof card[k] === 'string' ? limparNome(card[k]) : '';
+        if (v) return v;
       }
     } catch (e) { /* o app do ChatGuru mudou de forma: cai para a tela */ }
     return '';
@@ -122,8 +132,7 @@
   // ChatGuru mostra agora (elemento conferido no ChatGuru pelo dono em 25/09/2026).
   function nomeNoCabecalho() {
     const cabecalho = document.getElementById('chat_name');
-    const v = cabecalho ? cabecalho.textContent.replace(/\s+/g, ' ').trim() : '';
-    return v && !pareceTelefone(v) ? v.slice(0, 80) : '';
+    return cabecalho ? limparNome(cabecalho.textContent) : '';
   }
 
   function nomeDoLead(chatId) {
@@ -139,7 +148,7 @@
     const alvo = cartao.querySelector('[class*="name" i], [class*="nome" i], [class*="title" i], strong, b, h1, h2, h3, h4, h5, h6');
     const linhas = ((alvo || cartao).innerText || '').split('\n').map(s => s.trim());
     // Contato sem nome aparece como telefone: isso não é nome
-    return (linhas.find(s => s && !pareceTelefone(s)) || '').slice(0, 80);
+    return linhas.map(limparNome).find(Boolean) || '';
   }
 
   const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
