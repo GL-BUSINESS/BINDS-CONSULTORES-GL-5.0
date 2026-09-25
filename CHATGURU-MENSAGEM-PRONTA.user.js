@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGuru – mensagem pronta
 // @namespace    glcapital
-// @version      3.0
+// @version      3.1
 // @description  F2 abre o menu das mensagens prontas cadastradas no painel (Tampermonkeys › Mensagens do F2)
 // @match        https://s12.chatguru.app/*
 // @run-at       document-idle
@@ -27,6 +27,9 @@
   const CHAVE = /\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
   // Os que o script preenche sozinho; o consultor confere e pode corrigir. O resto ele digita.
   const AUTOMATICOS = ['nome', 'primeiro_nome', 'consultor', 'saudacao'];
+  // Toda chave que começa com "valor" ({valor}, {valor_parcela}…) é dinheiro: o consultor digita
+  // o número como quiser e sai "R$ 1.234,56". A mesma regra do painel (DINHEIRO lá).
+  const eDinheiro = k => k.startsWith('valor');
 
   function lerLocal(chave) {
     try { return localStorage.getItem(chave); } catch (e) { return null; }
@@ -91,20 +94,75 @@
     return vistas;
   }
 
-  function montar(texto, valores) {
-    return texto.replace(CHAVE, (bruto, k) => valores[k.toLowerCase()] || bruto);
+  function montar(texto) {
+    return texto.replace(CHAVE, (bruto, k) => valorFinal(k.toLowerCase()) ?? bruto);
   }
 
-  // O nome do lead como aparece no cartão do chat aberto, na lista da esquerda.
-  // ⚠ Leitura da tela do ChatGuru: se o layout mudar, volta vazio e o consultor digita.
+  // Onde o ChatGuru guarda o nome do chat, no objeto de cada cartão da lista
+  const CAMPOS_NOME = ['name', 'nome', 'chat_name', 'contact_name', 'nome_contato', 'display_name'];
+  const pareceTelefone = s => /^\+?[\d\s().-]{8,}$/.test(s);
+
+  // O nome ATUAL do lead no ChatGuru: o objeto do chat na lista do app Vue do site
+  // (window.testeVueJS.cards — o mesmo que o otimizador usa), que o site mantém em dia pelo
+  // websocket; renomeou o chat, o próximo F2 já vem com o nome novo.
+  function nomeNoApp(chatId) {
+    try {
+      const cards = window.testeVueJS && window.testeVueJS.cards;
+      const card = cards && cards.find && cards.find(c => c && String(c.id) === chatId);
+      if (!card) return '';
+      for (const k of CAMPOS_NOME) {
+        const v = typeof card[k] === 'string' ? card[k].trim() : '';
+        if (v && !pareceTelefone(v)) return v.slice(0, 80);
+      }
+    } catch (e) { /* o app do ChatGuru mudou de forma: cai para a tela */ }
+    return '';
+  }
+
   function nomeDoLead(chatId) {
+    return nomeNoApp(chatId) || nomeNaTela(chatId);
+  }
+
+  // Plano B: o texto do cartão do chat aberto, na lista da esquerda.
+  // ⚠ Leitura da tela do ChatGuru: se o layout mudar, volta vazio e o consultor digita.
+  function nomeNaTela(chatId) {
     const link = document.querySelector(`a[href*="${chatId}"]`);
     const cartao = link && (link.closest('.cg__card-container') || link);
     if (!cartao) return '';
     const alvo = cartao.querySelector('[class*="name" i], [class*="nome" i], [class*="title" i], strong, b, h1, h2, h3, h4, h5, h6');
     const linhas = ((alvo || cartao).innerText || '').split('\n').map(s => s.trim());
     // Contato sem nome aparece como telefone: isso não é nome
-    return (linhas.find(s => s && !/^\+?[\d\s().-]{8,}$/.test(s)) || '').slice(0, 80);
+    return (linhas.find(s => s && !pareceTelefone(s)) || '').slice(0, 80);
+  }
+
+  const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+
+  // "512,3" · "512.30" · "1.234,56" · "1234" · "R$ 1.234,56" → "R$ 1.234,56"; o que não der
+  // para ler sem chutar (vazio, letra, "1,234", três casas decimais) → null.
+  function emReais(bruto) {
+    const s = String(bruto || '').replace(/R\$|\s/gi, '');
+    if (!/^\d[\d.,]*$/.test(s)) return null;
+    const pontos = s.split('.').length - 1, virgulas = s.split(',').length - 1;
+    let inteiro = s, decimal = '';
+    if (pontos && virgulas) {                    // o último separador é o decimal
+      const sep = Math.max(s.lastIndexOf('.'), s.lastIndexOf(','));
+      inteiro = s.slice(0, sep).replace(/[.,]/g, '');
+      decimal = s.slice(sep + 1);
+    } else if (virgulas === 1) {                 // 512,30
+      [inteiro, decimal] = s.split(',');
+    } else if (pontos === 1 && s.split('.')[1].length !== 3) {   // 512.30 (1.234 é milhar)
+      [inteiro, decimal] = s.split('.');
+    } else if (virgulas > 1 || (pontos && virgulas === 0)) {     // 1.234 · 1.234.567 · 1,234,567
+      inteiro = s.replace(/[.,]/g, '');
+    }
+    if (!/^\d+$/.test(inteiro) || !/^\d{0,2}$/.test(decimal)) return null;
+    return BRL.format(Number(`${inteiro}.${decimal || '0'}`)).replace(/\u00a0/g, ' ');
+  }
+
+  // O que vai no lugar da chave, ou null se falta (vazio ou valor que não deu para ler)
+  function valorFinal(k) {
+    const v = (menu.valores[k] || '').trim();
+    if (!v) return null;
+    return eDinheiro(k) ? emReais(v) : v;
   }
 
   function primeiroNome(nome) {
@@ -154,6 +212,7 @@
     .campos { padding: 10px 14px 0; display: grid; gap: 8px; }
     label > span { display: block; font-size: 12px; color: #475569; margin-bottom: 2px; }
     .auto { color: #0f766e; }
+    .erro { color: #b91c1c; }
     .final { margin: 10px 14px; padding: 10px; background: #f1f5f9; border-radius: 6px;
       white-space: pre-wrap; word-break: break-word; overflow-y: auto; min-height: 3em; }
     .falta { background: #fef3c7; color: #92400e; border-radius: 3px; padding: 0 2px; }
@@ -269,6 +328,7 @@
     menu.valores = {};
     menu.editados = new Set();
     menu.entradas = {};
+    menu.dicas = {};
     for (const k of menu.chaves) menu.valores[k] = auto[k] || '';
 
     menu.caixa.replaceChildren();
@@ -287,10 +347,14 @@
         const rotulo = el('label');
         const nome = el('span', null, `{${k}}`);
         if (AUTOMATICOS.includes(k)) {
-          nome.appendChild(el('span', 'auto', menu.valores[k] ? ' · automático, confira'
+          nome.appendChild(el('span', 'auto', menu.valores[k]
+            ? (k === 'nome' || k === 'primeiro_nome' ? ' · do ChatGuru, confira' : ' · automático, confira')
             : k === 'consultor' ? ' · digite uma vez, fica lembrado' : ' · não achei, digite'));
         }
+        // Dinheiro: a dica mostra como vai sair (desenharFinal a atualiza)
+        if (eDinheiro(k)) nome.appendChild(menu.dicas[k] = el('span', 'auto'));
         const entrada = el('input');
+        if (eDinheiro(k)) entrada.inputMode = 'decimal';
         entrada.value = menu.valores[k];
         entrada.addEventListener('input', () => {
           menu.valores[k] = entrada.value;
@@ -332,17 +396,26 @@
     let pos = 0;
     for (const achado of menu.atual.texto.matchAll(CHAVE)) {
       menu.final.append(menu.atual.texto.slice(pos, achado.index));
-      const valor = menu.valores[achado[1].toLowerCase()];
-      menu.final.append(valor ? valor : el('span', 'falta', achado[0]));
+      const valor = valorFinal(achado[1].toLowerCase());
+      menu.final.append(valor !== null ? valor : el('span', 'falta', achado[0]));
       pos = achado.index + achado[0].length;
     }
     menu.final.append(menu.atual.texto.slice(pos));
+    for (const [k, dica] of Object.entries(menu.dicas)) {
+      const v = valorFinal(k);
+      dica.textContent = v !== null ? ` · sai como ${v}` : menu.valores[k].trim() ? ' · não entendi o valor' : ' · em reais';
+      dica.className = v === null && menu.valores[k].trim() ? 'erro' : 'auto';
+    }
     const faltam = faltando();
+    const ilegiveis = faltam.filter(k => menu.valores[k].trim());
+    const vazios = faltam.filter(k => !menu.valores[k].trim());
     menu.botao.disabled = !podeEnviar();
-    avisar(faltam.length ? `Falta preencher: ${faltam.map(k => `{${k}}`).join(', ')}` : '');
+    avisar([vazios.length ? `Falta preencher: ${vazios.map(k => `{${k}}`).join(', ')}` : '',
+            ilegiveis.length ? `Valor que não entendi: ${ilegiveis.map(k => `{${k}}`).join(', ')} (ex.: 1.234,56)` : '']
+      .filter(Boolean).join(' · '), ilegiveis.length > 0);
   }
 
-  const faltando = () => menu.chaves.filter(k => !menu.valores[k].trim());
+  const faltando = () => menu.chaves.filter(k => valorFinal(k) === null);
   const podeEnviar = () => !enviando && !!menu.chatId && !faltando().length;
 
   function avisar(texto, erro) {
@@ -353,7 +426,7 @@
   async function enviar() {
     if (!menu || menu.passo !== 'form' || enviando || menu.botao.disabled) return;
     if (chatAberto() !== menu.chatId) return avisar('O chat aberto mudou — feche (Esc) e abra o F2 de novo.', true);
-    const texto = montar(menu.atual.texto, menu.valores);
+    const texto = montar(menu.atual.texto);
     const atual = menu;
     enviando = true;
     atual.botao.disabled = true;
