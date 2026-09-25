@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGuru - Ligar Otimizador
 // @namespace    ChatGuru - Ligar Otimizador
-// @version      1.1
+// @version      1.2
 // @match        https://s12.chatguru.app/*
 // @grant        none
 // @run-at       document-idle
@@ -17,7 +17,7 @@
     return;
   }
 
-  const VERSION = '2.1.1';
+  const VERSION = '2.1.2';
   const TAG = '[CG-Turbo]';
 
   // ============================ CONFIGURAÇÃO ============================
@@ -85,7 +85,7 @@
     events: 0, flushes: 0, applied: 0, badEvents: 0, flushMs: 0, flushByMode: {}, sched: 'active',
     dropped: 0, trimmed: 0, trimSkipped: 0, maxSeenCards: 0, pageBumps: 0, reconnects: 0,
     dateHits: 0, dateMiss: 0, lazyImgs: 0, resizesHeld: 0, resizesFired: 0,
-    instRebuilds: 0, indexFixed: 0, forwardSyncs: 0, scrollFixes: 0,
+    instRebuilds: 0, indexFixed: 0, forwardSyncs: 0, scrollFixes: 0, scrollContained: 0,
   };
   const api = {
     CFG, stats,
@@ -346,17 +346,53 @@
   //    A tela de chats cabe na janela (o app calcula as alturas), mas às vezes a
   //    página inteira ou o contêiner das três colunas fica rolado: o topo dos
   //    filtros some e sobra uma faixa vazia embaixo da conversa.
-  //    (a) a lista/conversa que chega ao fim não repassa a rolagem para a página;
+  //    (a) a lista/conversa que chega ao fim não repassa a rolagem para a página.
+  //        Só o rolador mais externo de cada coluna recebe overscroll-behavior:
+  //        contain. Aplicado em todos os elementos (1.1), qualquer coisa que rola
+  //        dentro de uma mensagem (conteúdo largo, caixinha com rolagem, 1 px de
+  //        sobra) segurava a roda e a conversa não andava;
   //    (b) se a página ou um contêiner overflow:hidden acima da lista rolar
   //        mesmo assim, volta para 0.
   // ---------------------------------------------------------------------
   if (CFG.fixScroll) {
+    const CONTAIN = 'data-cg-contain';
     safe('scroll:css', () => whenHead(() => {
       const style = document.createElement('style');
       style.id = 'cg-turbo-scroll-css';
-      style.textContent = 'html:has(#cg-chatlist) body *{overscroll-behavior:contain;}';
+      style.textContent = 'html:has(#cg-chatlist) [' + CONTAIN + ']{overscroll-behavior:contain;}';
       document.head.appendChild(style);
     }));
+    safe('scroll:contain', () => {
+      const canScroll = (o) => o === 'auto' || o === 'scroll' || o === 'overlay';
+      const cache = new WeakMap(); // elemento -> overflow auto/scroll?
+      const isScroller = (el) => {
+        let v = cache.get(el);
+        if (v === undefined) {
+          const st = getComputedStyle(el);
+          v = canScroll(st.overflowY) || canScroll(st.overflowX);
+          cache.set(el, v);
+        }
+        return v;
+      };
+      // Sobe do alvo até o contêiner que abraça a lista (ou o body) e marca o
+      // último rolador do caminho: a coluna. Os de dentro continuam repassando
+      // a rolagem para ela.
+      const mark = (e) => {
+        const list = document.getElementById('cg-chatlist');
+        if (!list) return;
+        let top = null;
+        for (let el = e.target; el && el.nodeType === 1 && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+          if (el.hasAttribute(CONTAIN)) return;
+          if (el.contains(list)) break;
+          if (isScroller(el)) top = el;
+        }
+        if (!top) return;
+        top.setAttribute(CONTAIN, '');
+        stats.scrollContained++;
+      };
+      ['wheel', 'touchstart', 'pointerdown'].forEach((ev) =>
+        window.addEventListener(ev, (e) => safe('scroll:mark', () => mark(e)), { capture: true, passive: true }));
+    });
     safe('scroll:guard', () => {
       let cacheList = null;
       let cache = new WeakMap(); // elemento -> deve ficar sem rolagem?
