@@ -1,97 +1,112 @@
 // ==UserScript==
 // @name         ATALHOS PADRONIZADOS - CONSULTORES FGTS
-// @version      7.1
+// @version      8.0
 // @match        https://s12.chatguru.app/*
 // @grant        none
+// @description  Carregador: baixa codigo/BINDS-FGTS.js do GitHub e só roda se estiver assinado
 // @updateURL    https://raw.githubusercontent.com/GL-BUSINESS/BINDS-CONSULTORES-GL-5.0/main/BINDS-FGTS.user.js
 // @downloadURL  https://raw.githubusercontent.com/GL-BUSINESS/BINDS-CONSULTORES-GL-5.0/main/BINDS-FGTS.user.js
 // ==/UserScript==
 
-(function() {
-    'use strict';
+// CARREGADOR — este arquivo não muda mais. O código de verdade é codigo/BINDS-FGTS.js, baixado do
+// GitHub toda vez que o ChatGuru abre, e SÓ RODA SE ESTIVER ASSINADO com a chave que fica no s2
+// (~/.gl-userscripts-assinatura.pem): escrever no GitHub não basta. Mudou e assinou (assinar.py),
+// vale no próximo F5 de todo mundo — o GitHub guarda cópia por até 5 min. Decisão do dono em
+// 25/09/2026.
+(function () {
+  'use strict';
 
-    // =========================================================================
-    //
-    //                           PROIBIDO ALTERAR POR CONTA PROPRIA!
-    //
-    // =========================================================================
-    const CONFIGURACAO_ATALHOS = {
-        'F1':  ['6a6d66fd26c72b9fbafd66ee'], // delegar clt
-        'F2':  ['6a6cd569df27400876c417c9'], // fluxo fgts
-        'F3':  ['6a6cd577df27400876c417fc'], // Envio manual consultores
-        'F4':  ['6a3064a215997fc4040dfe15'], // Inicio Atendimento
-        'F6':  ['69dce931939d5d56e962fed1'], // fechar atend
-        'F7':  ['65f9b93c0962dc56032327ce'],  // sem saldo 21
-        'F8':  ['660eed83b644ff84d9cfe4a9'],  // cont atend
-        'F9':  ['67d2d40f754db923f517fb7f'],  // detalhado ns
-        'F10': ['699721ee8320bfb90ed2464a'],  // aniversário
-        'F11': ['69fcb8274c65297d14982a0a'], // depois de passar valor
-        'F12': ['69205d691b9474ab13c568d3'],  // audio fgts negado
-        "CTRL+'": ['6a18695f48bb99c330346eb8'],   // ainda não aut
-    };
-    // =========================================================================
+  const NOME = 'BINDS-FGTS';
+  const URL = `https://raw.githubusercontent.com/GL-BUSINESS/BINDS-CONSULTORES-GL-5.0/main/codigo/${NOME}.js`;
+  const CHAVE_PUBLICA = 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE5XNIVuf1tTqYWc8M4+BL1dr5McbNg7Z0UpNncF3L++XbNxmCLIb0aicGiTW4bHvs2TwhXr++DZMV5aMu+itz9Q==';
+  // A última versão assinada que rodou: vale se o GitHub não responder
+  const GUARDADO = `gl_codigo_${NOME}`;
 
-    function dispararClique(seletor) {
-        if (typeof $ !== 'undefined') {
-            var jqBtn = $(seletor);
-            if (jqBtn.length > 0) {
-                jqBtn.click();
-                return true;
-            }
-        }
-        var jsBtn = document.querySelector(seletor);
-        if (jsBtn) {
-            jsBtn.click();
-            return true;
-        }
-        return false;
+  const bytes = b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+
+  // A assinatura cobre "<NOME>\n<código>": a de um script não serve para outro
+  async function assinado(codigo, assinatura) {
+    try {
+      const chave = await crypto.subtle.importKey('spki', bytes(CHAVE_PUBLICA),
+        { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+      return await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, chave,
+        bytes(assinatura.trim()), new TextEncoder().encode(`${NOME}\n${codigo}`));
+    } catch (e) {
+      return false;
     }
+  }
 
-    // Monta o nome da tecla no mesmo formato usado na configuracao acima.
-    // Ex.: "F7", "CTRL+'", "ALT+G"
-    function nomeDaTecla(e) {
-        var base = e.key.toUpperCase();
-
-        // A apostrofe muda de lugar conforme o teclado (ABNT2 usa a tecla ao lado
-        // do 1, US usa a do lado do ENTER) e as vezes chega como "Dead".
-        // Tratamos apostrofe e aspas como a mesma tecla.
-        if (base === "'" || base === '"' ||
-            (base === 'DEAD' && (e.code === 'Quote' || e.code === 'Backquote'))) {
-            base = "'";
-        }
-
-        var prefixo = '';
-        if (e.ctrlKey || e.metaKey) prefixo += 'CTRL+';
-        if (e.altKey) prefixo += 'ALT+';
-
-        return prefixo + base;
+  async function baixar(url) {
+    const ctl = new AbortController();
+    const prazo = setTimeout(() => ctl.abort(), 5000);
+    try {
+      const r = await fetch(url, { cache: 'no-store', credentials: 'omit', signal: ctl.signal });
+      if (r.ok) return await r.text();
+      console.warn(`[gl] ${NOME}: o GitHub respondeu HTTP ${r.status} para ${url}`);
+    } catch (e) {
+      console.warn(`[gl] ${NOME}: não baixei ${url}`, e);
+    } finally {
+      clearTimeout(prazo);
     }
+    return null;
+  }
 
-    document.addEventListener('keydown', function(e) {
-        const teclaPressionada = nomeDaTecla(e);
+  function ler() {
+    try { return JSON.parse(localStorage.getItem(GUARDADO)) || null; } catch (e) { return null; }
+  }
+  function guardar(codigo, assinatura) {
+    try { localStorage.setItem(GUARDADO, JSON.stringify({ codigo, assinatura })); } catch (e) { /* sem storage */ }
+  }
 
-        if (CONFIGURACAO_ATALHOS.hasOwnProperty(teclaPressionada)) {
+  // eval indireto: roda no escopo global da página, como o script instalado rodava
+  function rodar(codigo, origem) {
+    (0, eval)(`${codigo}\n//# sourceURL=gl-${NOME}.js`);
+    console.log(`[gl] ${NOME}: rodando o código ${origem}`);
+  }
 
-            const listaIds = CONFIGURACAO_ATALHOS[teclaPressionada];
+  function avisar(texto) {
+    const aviso = document.createElement('div');
+    aviso.textContent = texto;
+    Object.assign(aviso.style, {
+      position: 'fixed', left: '16px', bottom: '16px', zIndex: 2147483000, maxWidth: '380px',
+      padding: '8px 12px', background: '#b91c1c', color: '#fff', font: '13px sans-serif',
+      borderRadius: '6px', boxShadow: '0 4px 12px rgba(0,0,0,.25)',
+    });
+    (document.body || document.documentElement).appendChild(aviso);
+    setTimeout(() => aviso.remove(), 15000);
+  }
 
-            // Atalho ainda sem dialogo configurado: deixa a tecla passar normal.
-            if (listaIds[0] === '') {
-                return;
-            }
-
-            // Bloqueia o comando do Chrome imediatamente.
-            // Isso impede o F6 de ir para a barra de endereco e o F1 de abrir ajuda.
-            e.preventDefault();
-            e.stopPropagation();
-
-            for (var i = 0; i < listaIds.length; i++) {
-                var selector = 'button[data-dialog-id="' + listaIds[i] + '"]';
-                var clicouComSucesso = dispararClique(selector);
-
-                if (clicouComSucesso) {
-                    break;
-                }
-            }
+  (async () => {
+    const [codigo, assinatura] = await Promise.all([baixar(URL), baixar(`${URL}.sig`)]);
+    if (codigo && assinatura) {
+      if (await assinado(codigo, assinatura)) {
+        try {
+          rodar(codigo, 'do GitHub');
+          guardar(codigo, assinatura);
+          return;
+        } catch (e) {
+          console.error(`[gl] ${NOME}: o código do GitHub falhou`, e);
+          // Erro de sintaxe não chega a rodar nada, então dá para cair na versão guardada. Erro no
+          // meio da execução pode já ter ligado metade do script: rodar a velha em cima duplicaria.
+          if (!(e instanceof SyntaxError)) {
+            avisar(`${NOME}: o código novo deu erro ao rodar. Avise o TI.`);
+            return;
+          }
         }
-    }, true); // O "true" aqui faz o script ouvir a tecla antes de qualquer outra coisa na página
+      } else {
+        // Editado sem assinar (ou a cópia de 5 min do GitHub pegou um sem o outro): fica o guardado
+        console.warn(`[gl] ${NOME}: o código do GitHub não tem assinatura válida — não rodo`);
+      }
+    }
+    const velho = ler();
+    if (velho && velho.codigo !== codigo && await assinado(velho.codigo, velho.assinatura)) {
+      try {
+        rodar(velho.codigo, 'guardado neste navegador');
+        return;
+      } catch (e) {
+        console.error(`[gl] ${NOME}: o código guardado também falhou`, e);
+      }
+    }
+    avisar(`${NOME} não carregou (GitHub fora do ar ou código sem assinatura): os atalhos dele estão desligados. Avise o TI.`);
+  })();
 })();

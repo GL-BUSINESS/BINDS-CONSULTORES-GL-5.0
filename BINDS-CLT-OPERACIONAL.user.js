@@ -1,90 +1,112 @@
 // ==UserScript==
 // @name         ATALHOS PADRONIZADOS - CONSIGNADO CLT OPERACIONAL
-// @version      1.1
+// @version      2.0
 // @match        https://s12.chatguru.app/*
 // @grant        none
+// @description  Carregador: baixa codigo/BINDS-CLT-OPERACIONAL.js do GitHub e só roda se estiver assinado
 // @updateURL    https://raw.githubusercontent.com/GL-BUSINESS/BINDS-CONSULTORES-GL-5.0/main/BINDS-CLT-OPERACIONAL.user.js
 // @downloadURL  https://raw.githubusercontent.com/GL-BUSINESS/BINDS-CONSULTORES-GL-5.0/main/BINDS-CLT-OPERACIONAL.user.js
 // ==/UserScript==
 
-(function() {
-    'use strict';
+// CARREGADOR — este arquivo não muda mais. O código de verdade é codigo/BINDS-CLT-OPERACIONAL.js, baixado do
+// GitHub toda vez que o ChatGuru abre, e SÓ RODA SE ESTIVER ASSINADO com a chave que fica no s2
+// (~/.gl-userscripts-assinatura.pem): escrever no GitHub não basta. Mudou e assinou (assinar.py),
+// vale no próximo F5 de todo mundo — o GitHub guarda cópia por até 5 min. Decisão do dono em
+// 25/09/2026.
+(function () {
+  'use strict';
 
-    // =========================================================================
-    // CONFIGURAÇÃO DOS ATALHOS PADRÕES (IGUAL PARA TODOS OS CONSULTORES)
-    // =========================================================================
-    const CONFIGURACAO_ATALHOS = {
-        'F3':  [''], // 
-        'F4':  [''], // 
-        'F6':  [''], // 
-        'F7':  [''], // 
-        'F8':  ['69692a94bd22fdc5f4a312c9'], // CONFIRMAR PGTO
-        'F9':  ['69610f0979048dcd4033d958'], // FORM CLT
-        'F10': [''], // NÃO MAPEADO
-        'F11': [''], // NÃO MAPEADO
-        'F12': [''], // NÃO MAPEADO
-    };
+  const NOME = 'BINDS-CLT-OPERACIONAL';
+  const URL = `https://raw.githubusercontent.com/GL-BUSINESS/BINDS-CONSULTORES-GL-5.0/main/codigo/${NOME}.js`;
+  const CHAVE_PUBLICA = 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE5XNIVuf1tTqYWc8M4+BL1dr5McbNg7Z0UpNncF3L++XbNxmCLIb0aicGiTW4bHvs2TwhXr++DZMV5aMu+itz9Q==';
+  // A última versão assinada que rodou: vale se o GitHub não responder
+  const GUARDADO = `gl_codigo_${NOME}`;
 
-    // =========================================================================
-    // CONFIGURAÇÃO DA TECLA DE APRESENTAÇÃO INDIVIDUAL
-    // =========================================================================
-    const TECLA_APRESENTACAO = 'F2'; // Tecla que cada um usará para sua apresentação
-    // =========================================================================
+  const bytes = b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
 
-
-    function dispararClique(seletor) {
-        if (typeof $ !== 'undefined') {
-            var jqBtn = $(seletor);
-            if (jqBtn.length > 0) { jqBtn.click(); return true; }
-        }
-        var jsBtn = document.querySelector(seletor);
-        if (jsBtn) { jsBtn.click(); return true; }
-        return false;
+  // A assinatura cobre "<NOME>\n<código>": a de um script não serve para outro
+  async function assinado(codigo, assinatura) {
+    try {
+      const chave = await crypto.subtle.importKey('spki', bytes(CHAVE_PUBLICA),
+        { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+      return await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, chave,
+        bytes(assinatura.trim()), new TextEncoder().encode(`${NOME}\n${codigo}`));
+    } catch (e) {
+      return false;
     }
+  }
 
-    document.addEventListener('keydown', function(e) {
-        const teclaPressionada = e.key.toUpperCase();
+  async function baixar(url) {
+    const ctl = new AbortController();
+    const prazo = setTimeout(() => ctl.abort(), 5000);
+    try {
+      const r = await fetch(url, { cache: 'no-store', credentials: 'omit', signal: ctl.signal });
+      if (r.ok) return await r.text();
+      console.warn(`[gl] ${NOME}: o GitHub respondeu HTTP ${r.status} para ${url}`);
+    } catch (e) {
+      console.warn(`[gl] ${NOME}: não baixei ${url}`, e);
+    } finally {
+      clearTimeout(prazo);
+    }
+    return null;
+  }
 
-        // 1. LÓGICA DA APRESENTAÇÃO PESSOAL (ID INDIVIDUAL)
-        if (teclaPressionada === TECLA_APRESENTACAO) {
-            e.preventDefault();
-            e.stopPropagation();
+  function ler() {
+    try { return JSON.parse(localStorage.getItem(GUARDADO)) || null; } catch (e) { return null; }
+  }
+  function guardar(codigo, assinatura) {
+    try { localStorage.setItem(GUARDADO, JSON.stringify({ codigo, assinatura })); } catch (e) { /* sem storage */ }
+  }
 
-            // Tenta pegar o ID que está salvo no computador do funcionário
-            let idPessoal = localStorage.getItem('id_apresentacao_consultor');
+  // eval indireto: roda no escopo global da página, como o script instalado rodava
+  function rodar(codigo, origem) {
+    (0, eval)(`${codigo}\n//# sourceURL=gl-${NOME}.js`);
+    console.log(`[gl] ${NOME}: rodando o código ${origem}`);
+  }
 
-            // Se não tiver nenhum ID salvo ainda...
-            if (!idPessoal) {
-                // Abre a caixinha perguntando o ID
-                idPessoal = prompt("Configuração Inicial:\nCole aqui o seu ID de Diálogo de Apresentação Pessoal:");
-                
-                if (idPessoal) {
-                    idPessoal = idPessoal.trim();
-                    // Salva no navegador para nunca mais pedir
-                    localStorage.setItem('id_apresentacao_consultor', idPessoal);
-                    alert("ID Salvo com sucesso! Aperte a tecla novamente para testar.");
-                }
-                return;
-            }
+  function avisar(texto) {
+    const aviso = document.createElement('div');
+    aviso.textContent = texto;
+    Object.assign(aviso.style, {
+      position: 'fixed', left: '16px', bottom: '16px', zIndex: 2147483000, maxWidth: '380px',
+      padding: '8px 12px', background: '#b91c1c', color: '#fff', font: '13px sans-serif',
+      borderRadius: '6px', boxShadow: '0 4px 12px rgba(0,0,0,.25)',
+    });
+    (document.body || document.documentElement).appendChild(aviso);
+    setTimeout(() => aviso.remove(), 15000);
+  }
 
-            // Se já tem o ID salvo, faz o clique normal
-            var selectorPessoal = 'button[data-dialog-id="' + idPessoal + '"]';
-            dispararClique(selectorPessoal);
+  (async () => {
+    const [codigo, assinatura] = await Promise.all([baixar(URL), baixar(`${URL}.sig`)]);
+    if (codigo && assinatura) {
+      if (await assinado(codigo, assinatura)) {
+        try {
+          rodar(codigo, 'do GitHub');
+          guardar(codigo, assinatura);
+          return;
+        } catch (e) {
+          console.error(`[gl] ${NOME}: o código do GitHub falhou`, e);
+          // Erro de sintaxe não chega a rodar nada, então dá para cair na versão guardada. Erro no
+          // meio da execução pode já ter ligado metade do script: rodar a velha em cima duplicaria.
+          if (!(e instanceof SyntaxError)) {
+            avisar(`${NOME}: o código novo deu erro ao rodar. Avise o TI.`);
             return;
+          }
         }
-
-        // 2. LÓGICA DOS ATALHOS PADRÕES DO GITHUB
-        if (CONFIGURACAO_ATALHOS.hasOwnProperty(teclaPressionada)) {
-            e.preventDefault();
-            e.stopPropagation();
-
-            const listaIds = CONFIGURACAO_ATALHOS[teclaPressionada];
-            if (listaIds[0] === '') return;
-
-            for (var i = 0; i < listaIds.length; i++) {
-                var selector = 'button[data-dialog-id="' + listaIds[i] + '"]';
-                if (dispararClique(selector)) break;
-            }
-        }
-    }, true);
+      } else {
+        // Editado sem assinar (ou a cópia de 5 min do GitHub pegou um sem o outro): fica o guardado
+        console.warn(`[gl] ${NOME}: o código do GitHub não tem assinatura válida — não rodo`);
+      }
+    }
+    const velho = ler();
+    if (velho && velho.codigo !== codigo && await assinado(velho.codigo, velho.assinatura)) {
+      try {
+        rodar(velho.codigo, 'guardado neste navegador');
+        return;
+      } catch (e) {
+        console.error(`[gl] ${NOME}: o código guardado também falhou`, e);
+      }
+    }
+    avisar(`${NOME} não carregou (GitHub fora do ar ou código sem assinatura): os atalhos dele estão desligados. Avise o TI.`);
+  })();
 })();
