@@ -2,8 +2,10 @@
 // Editou aqui e subiu na main: vale no próximo F5 de todo mundo, sem mexer no @version.
 // Roda no escopo da página do ChatGuru.
 //
-// Lê o campo personalizado "trafego" (timestamp) do chat aberto e mostra o selo TRAFEGO à esquerda
-// do botão de status quando o timestamp tem menos de 7 dias.
+// Lê o campo personalizado "trafego" do chat aberto e mostra um selo à esquerda do botão de status:
+//   • timestamp com menos de 7 dias → TRAFEGO, verde (quem grava é a edge function `trafego`);
+//   • "Leilão" → Leilão, azul, sem prazo (quem grava é o disparo frio do leilão, leilao-disparo).
+// O campo é um só: vale o que foi gravado por último.
 
 (() => {
   'use strict';
@@ -35,11 +37,15 @@
 
   const JANELA_MS = 7 * 24 * 3600 * 1000; // só mostra se o timestamp tiver menos de 7 dias
 
+  // "Leilão", "leilao", "LEILÃO"...: sem acento e sem caixa
+  const ehLeilao = raw => raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase() === 'leilao';
+
   const css = document.createElement('style');
   css.textContent = '@keyframes cgTrafegoPisca{0%,100%{opacity:1}50%{opacity:.35}}' +
     '#cg-trafego{align-items:center;padding:3px 8px;border-radius:4px;background:#28a745;color:#fff;' +
     'font-size:12px;font-weight:bold;line-height:1.3;white-space:nowrap;cursor:default;' +
     'animation:cgTrafegoPisca 1s ease-in-out infinite}' +
+    '#cg-trafego.cg-leilao{background:#007bff}' +
     '#cg-trafego:hover{animation-play-state:paused}';
   document.head.appendChild(css);
 
@@ -57,13 +63,19 @@
     if (badge.nextElementSibling !== grupo) grupo.before(badge);
 
     const t = lerDoDom();
-    const idade = t ? Date.now() - t.date : NaN;
-    const visivel = t && !isNaN(idade) && t.chatId === location.hash.slice(1) && idade <= JANELA_MS && idade >= -60000;
+    const doChat = t && t.chatId === location.hash.slice(1);
+    const leilao = doChat && ehLeilao(t.raw);
+    const idade = doChat && !leilao ? Date.now() - t.date : NaN;
+    const visivel = leilao || (!isNaN(idade) && idade <= JANELA_MS && idade >= -60000);
     // só mexe no DOM quando algo muda
     const display = visivel ? 'inline-flex' : 'none';
     if (badge.style.display !== display) badge.style.display = display;
     if (!visivel) return;
-    const title = `${t.date.toLocaleString('pt-BR')} · há ${decorrido(t.date)}`;
+    const texto = leilao ? 'Leilão' : 'TRAFEGO';
+    if (badge.textContent !== texto) badge.textContent = texto;
+    badge.classList.toggle('cg-leilao', leilao);
+    const title = leilao ? 'Disparo frio do leilão'
+      : `${t.date.toLocaleString('pt-BR')} · há ${decorrido(t.date)}`;
     if (badge.title !== title) badge.title = title;
   }
 
