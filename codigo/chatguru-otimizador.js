@@ -5,12 +5,17 @@
 (function () {
   'use strict';
   if (window.top !== window) return;
+  // Editor de chatbot (/chatbot/…): o otimizador não mexe nessa página
+  if (/^\/chatbot(\/|$)/.test(location.pathname)) {
+    console.log('[CG-Turbo] desligado em ' + location.pathname);
+    return;
+  }
   if (window.__cgTurbo) {
     console.warn('[CG-Turbo] outra cópia ou versão do ChatGuru Turbo já está ativa. Desative a antiga no Tampermonkey.');
     return;
   }
 
-  const VERSION = '2.1.2';
+  const VERSION = '2.1.3';
   const TAG = '[CG-Turbo]';
 
   // ============================ CONFIGURAÇÃO ============================
