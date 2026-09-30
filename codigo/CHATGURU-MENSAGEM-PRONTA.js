@@ -218,13 +218,22 @@
     .tecla { font: 11px ui-monospace, monospace; border: 1px solid #cbd5e1; border-radius: 4px;
       padding: 0 4px; color: #475569; }
     .vazio { padding: 14px 10px; color: #64748b; }
-    .campos { padding: 10px 14px 0; display: grid; gap: 8px; }
+    /* Tela baixa: a caixa da mensagem encolhe até o mínimo e os campos rolam — o Enviar nunca some */
+    .campos { padding: 10px 14px 0; display: grid; gap: 8px; overflow-y: auto; min-height: 64px; }
     label > span { display: block; font-size: 12px; color: #475569; margin-bottom: 2px; }
     .auto { color: #0f766e; }
     .erro { color: #b91c1c; }
-    .final { margin: 10px 14px; padding: 10px; background: #f1f5f9; border-radius: 6px;
-      white-space: pre-wrap; word-break: break-word; overflow-y: auto; min-height: 3em; }
-    .falta { background: #fef3c7; color: #92400e; border-radius: 3px; padding: 0 2px; }
+    .cab-texto { margin: 10px 14px 0; display: flex; gap: 8px; align-items: baseline;
+      font-size: 12px; color: #475569; }
+    .cab-texto .editada { color: #b45309; }
+    .final { display: block; box-sizing: border-box; width: calc(100% - 28px); margin: 4px 14px 10px;
+      padding: 10px; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 6px;
+      font: inherit; color: inherit; white-space: pre-wrap; word-break: break-word;
+      min-height: 4.5em; max-height: 45vh; overflow-y: auto; resize: vertical; }
+    .final:focus { outline: 2px solid #128c7e; border-color: transparent; background: #fff; }
+    .editado .campos input { background: #f1f5f9; color: #94a3b8; }
+    button.link { margin-left: auto; padding: 0; border: 0; background: none; color: #0f766e;
+      font-size: 12px; text-decoration: underline; }
     .rodape { padding: 10px 14px; border-top: 1px solid #e2e8f0; display: flex; gap: 8px; align-items: center; }
     .status { flex: 1; font-size: 12px; color: #64748b; }
     .status.erro { color: #b91c1c; }
@@ -338,12 +347,13 @@
     menu.editados = new Set();
     menu.entradas = {};
     menu.dicas = {};
+    menu.editado = false;
     for (const k of menu.chaves) menu.valores[k] = auto[k] || '';
 
     menu.caixa.replaceChildren();
     const topo = el('div', 'topo');
     const titulo = el('div', 'titulo', m.nome);
-    titulo.appendChild(el('span', 'dica', `Enter envia · Esc ${menu.veioDaLista ? 'volta' : 'fecha'}`));
+    titulo.appendChild(el('span', 'dica', `Enter envia · Shift+Enter quebra linha · Esc ${menu.veioDaLista ? 'volta' : 'fecha'}`));
     const para = el('div', 'para', menu.chatId
       ? `Para: ${auto.nome || 'o chat aberto'} (chat …${menu.chatId.slice(-6)})`
       : 'Nenhum chat aberto — abra um chat para enviar.');
@@ -382,8 +392,22 @@
       menu.caixa.appendChild(campos);
     }
 
-    menu.final = el('div', 'final');
-    menu.caixa.appendChild(menu.final);
+    // A prévia é editável: o consultor ajusta o texto antes de enviar (pedido do dono em 30/09/2026)
+    const cab = el('div', 'cab-texto');
+    menu.rotuloTexto = el('span', null);
+    menu.refazer = el('button', 'link', 'Voltar ao modelo');
+    menu.refazer.title = 'Desfaz o que foi editado no texto e destrava os campos';
+    menu.refazer.addEventListener('click', () => { marcarEditado(false); desenharFinal(); menu.final.focus(); });
+    cab.append(menu.rotuloTexto, menu.refazer);
+    menu.final = el('textarea', 'final');
+    menu.final.spellcheck = true;
+    menu.final.addEventListener('input', () => {
+      if (!menu.editado) marcarEditado(true);
+      ajustarAltura();
+      conferir();
+    });
+    menu.caixa.append(cab, menu.final);
+    marcarEditado(false);
 
     const rodape = el('div', 'rodape');
     menu.status = el('div', 'status');
@@ -399,33 +423,62 @@
     (vazia ? menu.entradas[vazia] : menu.botao).focus();
   }
 
-  // O texto como vai sair; o que falta preencher aparece marcado
+  // O texto como vai sair, na caixa editável. Enquanto o consultor não mexe nela, os campos a
+  // preenchem (o que falta fica como {chave}); mexeu, ela vale como está e os campos travam,
+  // até "Voltar ao modelo". Assim os campos nunca apagam o que ele escreveu à mão.
   function desenharFinal() {
-    menu.final.replaceChildren();
-    let pos = 0;
-    for (const achado of menu.atual.texto.matchAll(CHAVE)) {
-      menu.final.append(menu.atual.texto.slice(pos, achado.index));
-      const valor = valorFinal(achado[1].toLowerCase());
-      menu.final.append(valor !== null ? valor : el('span', 'falta', achado[0]));
-      pos = achado.index + achado[0].length;
+    if (!menu.editado) {
+      menu.final.value = montar(menu.atual.texto);
+      ajustarAltura();
     }
-    menu.final.append(menu.atual.texto.slice(pos));
     for (const [k, dica] of Object.entries(menu.dicas)) {
       const v = valorFinal(k);
       dica.textContent = v !== null ? ` · sai como ${v}` : menu.valores[k].trim() ? ' · não entendi o valor' : ' · em reais';
       dica.className = v === null && menu.valores[k].trim() ? 'erro' : 'auto';
     }
-    const faltam = faltando();
-    const ilegiveis = faltam.filter(k => menu.valores[k].trim());
-    const vazios = faltam.filter(k => !menu.valores[k].trim());
-    menu.botao.disabled = !podeEnviar();
-    avisar([vazios.length ? `Falta preencher: ${vazios.map(k => `{${k}}`).join(', ')}` : '',
-            ilegiveis.length ? `Valor que não entendi: ${ilegiveis.map(k => `{${k}}`).join(', ')} (ex.: 1.234,56)` : '']
-      .filter(Boolean).join(' · '), ilegiveis.length > 0);
+    conferir();
   }
 
-  const faltando = () => menu.chaves.filter(k => valorFinal(k) === null);
-  const podeEnviar = () => !enviando && !!menu.chatId && !faltando().length;
+  function marcarEditado(sim) {
+    menu.editado = sim;
+    menu.caixa.classList.toggle('editado', sim);
+    for (const entrada of Object.values(menu.entradas)) entrada.readOnly = sim;
+    menu.rotuloTexto.className = sim ? 'editada' : '';
+    menu.rotuloTexto.textContent = sim
+      ? 'Mensagem editada à mão — vai assim; os campos acima travaram'
+      : 'Mensagem — dá para editar o texto antes de enviar';
+    menu.refazer.hidden = !sim;
+  }
+
+  function ajustarAltura() {
+    const t = menu.final;
+    t.style.height = 'auto';
+    t.style.height = `${Math.min(t.scrollHeight + 2, innerHeight * 0.45)}px`;
+  }
+
+  // O que ainda está como {chave} no texto que vai sair: valor vazio, ilegível ou deixado na edição
+  const faltando = () => chavesDe(menu.final.value);
+
+  function conferir() {
+    const faltam = faltando();
+    let aviso, erro = false;
+    if (!menu.final.value.trim()) {
+      aviso = 'A mensagem está vazia.';
+    } else if (menu.editado) {
+      aviso = faltam.length ? `Falta trocar no texto: ${faltam.map(k => `{${k}}`).join(', ')}` : '';
+    } else {
+      const ilegiveis = faltam.filter(k => (menu.valores[k] || '').trim());
+      const vazios = faltam.filter(k => !(menu.valores[k] || '').trim());
+      erro = ilegiveis.length > 0;
+      aviso = [vazios.length ? `Falta preencher: ${vazios.map(k => `{${k}}`).join(', ')}` : '',
+               ilegiveis.length ? `Valor que não entendi: ${ilegiveis.map(k => `{${k}}`).join(', ')} (ex.: 1.234,56)` : '']
+        .filter(Boolean).join(' · ');
+    }
+    menu.botao.disabled = !podeEnviar();
+    avisar(aviso, erro);
+  }
+
+  const podeEnviar = () => !enviando && !!menu.chatId && !!menu.final.value.trim() && !faltando().length;
 
   function avisar(texto, erro) {
     menu.status.textContent = texto;
@@ -434,8 +487,9 @@
 
   async function enviar() {
     if (!menu || menu.passo !== 'form' || enviando || menu.botao.disabled) return;
-    if (chatAberto() !== menu.chatId) return avisar('O chat aberto mudou — feche (Esc) e abra o F2 de novo.', true);
-    const texto = montar(menu.atual.texto);
+    if (chatAberto() !== menu.chatId) return avisar(`O chat aberto mudou — feche (Esc) e abra o ${TECLA_MENU} de novo.`, true);
+    // Sai o que está na caixa, com a edição do consultor
+    const texto = menu.final.value.trim();
     const atual = menu;
     enviando = true;
     atual.botao.disabled = true;
@@ -500,7 +554,7 @@
     }
     if (e.key === 'Tab') {
       // O foco fica no menu: fora dele, o que se digitasse iria para o ChatGuru, atrás
-      const focaveis = [...menu.raiz.querySelectorAll('input, button:not(:disabled)')];
+      const focaveis = [...menu.raiz.querySelectorAll('input:not([readonly]), textarea, button:not(:disabled):not([hidden])')];
       const n = focaveis.length;
       if (n) {
         parar(e);
@@ -519,7 +573,8 @@
         if (menu.visiveis[menu.sel]) mostrarFormulario(menu.visiveis[menu.sel]);
       }
     } else if (e.key === 'Enter' && !e.shiftKey) {
-      // Enter num botão é o clique dele (Voltar/Fechar); no resto, envia
+      // Enter num botão é o clique dele (Voltar/Fechar); no resto, envia. Shift+Enter passa:
+      // na caixa da mensagem é a quebra de linha, como no ChatGuru.
       if (e.composedPath()[0] instanceof HTMLButtonElement) return;
       parar(e);
       enviar();
