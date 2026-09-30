@@ -86,10 +86,6 @@
     return vistas;
   }
 
-  function montar(texto) {
-    return texto.replace(CHAVE, (bruto, k) => valorFinal(k.toLowerCase()) ?? bruto);
-  }
-
   // Onde o ChatGuru guarda o nome do chat, no objeto de cada cartão da lista
   const CAMPOS_NOME = ['name', 'nome', 'chat_name', 'contact_name', 'nome_contato', 'display_name'];
   const pareceTelefone = s => /^\+?[\d\s().-]{8,}$/.test(s);
@@ -231,7 +227,6 @@
       font: inherit; color: inherit; white-space: pre-wrap; word-break: break-word;
       min-height: 4.5em; max-height: 45vh; overflow-y: auto; resize: vertical; }
     .final:focus { outline: 2px solid #128c7e; border-color: transparent; background: #fff; }
-    .editado .campos input { background: #f1f5f9; color: #94a3b8; }
     button.link { margin-left: auto; padding: 0; border: 0; background: none; color: #0f766e;
       font-size: 12px; text-decoration: underline; }
     .rodape { padding: 10px 14px; border-top: 1px solid #e2e8f0; display: flex; gap: 8px; align-items: center; }
@@ -347,7 +342,6 @@
     menu.editados = new Set();
     menu.entradas = {};
     menu.dicas = {};
-    menu.editado = false;
     for (const k of menu.chaves) menu.valores[k] = auto[k] || '';
 
     menu.caixa.replaceChildren();
@@ -370,7 +364,7 @@
             ? (k === 'nome' || k === 'primeiro_nome' ? ' · do ChatGuru, confira' : ' · automático, confira')
             : k === 'consultor' ? ' · digite uma vez, fica lembrado' : ' · não achei, digite'));
         }
-        // Dinheiro: a dica mostra como vai sair (desenharFinal a atualiza)
+        // Dinheiro: a dica mostra como vai sair (atualizar a refaz)
         if (eDinheiro(k)) nome.appendChild(menu.dicas[k] = el('span', 'auto'));
         const entrada = el('input');
         if (eDinheiro(k)) entrada.inputMode = 'decimal';
@@ -378,12 +372,14 @@
         entrada.addEventListener('input', () => {
           menu.valores[k] = entrada.value;
           menu.editados.add(k);
+          aplicarCampo(k);
           // Corrigiu o nome: o primeiro nome acompanha, se ninguém mexeu nele
           if (k === 'nome' && 'primeiro_nome' in menu.valores && !menu.editados.has('primeiro_nome')) {
             menu.valores.primeiro_nome = primeiroNome(entrada.value);
             menu.entradas.primeiro_nome.value = menu.valores.primeiro_nome;
+            aplicarCampo('primeiro_nome');
           }
-          desenharFinal();
+          atualizar();
         });
         menu.entradas[k] = entrada;
         rotulo.append(nome, entrada);
@@ -392,22 +388,23 @@
       menu.caixa.appendChild(campos);
     }
 
-    // A prévia é editável: o consultor ajusta o texto antes de enviar (pedido do dono em 30/09/2026)
+    // A prévia é editável: o consultor ajusta o texto antes de enviar (pedido do dono em 30/09/2026).
+    // Os campos continuam valendo depois da edição — ver aplicarCampo.
     const cab = el('div', 'cab-texto');
     menu.rotuloTexto = el('span', null);
     menu.refazer = el('button', 'link', 'Voltar ao modelo');
-    menu.refazer.title = 'Desfaz o que foi editado no texto e destrava os campos';
-    menu.refazer.addEventListener('click', () => { marcarEditado(false); desenharFinal(); menu.final.focus(); });
+    menu.refazer.title = 'Desfaz o que foi escrito à mão no texto';
+    menu.refazer.addEventListener('click', () => { refazerDoModelo(); atualizar(); menu.final.focus(); });
     cab.append(menu.rotuloTexto, menu.refazer);
     menu.final = el('textarea', 'final');
     menu.final.spellcheck = true;
     menu.final.addEventListener('input', () => {
+      acompanharEdicao();
       if (!menu.editado) marcarEditado(true);
       ajustarAltura();
       conferir();
     });
     menu.caixa.append(cab, menu.final);
-    marcarEditado(false);
 
     const rodape = el('div', 'rodape');
     menu.status = el('div', 'status');
@@ -418,34 +415,80 @@
     rodape.append(menu.status, voltar, menu.botao);
     menu.caixa.appendChild(rodape);
 
-    desenharFinal();
+    refazerDoModelo();
+    atualizar();
     const vazia = menu.chaves.find(k => !menu.valores[k]);
     (vazia ? menu.entradas[vazia] : menu.botao).focus();
   }
 
-  // O texto como vai sair, na caixa editável. Enquanto o consultor não mexe nela, os campos a
-  // preenchem (o que falta fica como {chave}); mexeu, ela vale como está e os campos travam,
-  // até "Voltar ao modelo". Assim os campos nunca apagam o que ele escreveu à mão.
-  function desenharFinal() {
-    if (!menu.editado) {
-      menu.final.value = montar(menu.atual.texto);
-      ajustarAltura();
+  // O texto da caixa e, dentro dele, o trecho de cada {chave} (menu.trechos: {k, bruto, a, b},
+  // em ordem). Cada campo reescreve só o seu trecho, mesmo depois de o consultor editar o resto
+  // à mão — a 1ª versão travava os campos na edição, e um {valor} ainda vazio deixava o Enviar
+  // desligado sem saída (30/09/2026). Trecho que o consultor reescreve por dentro vira dele.
+  function refazerDoModelo() {
+    const modelo = menu.atual.texto;
+    let texto = '', pos = 0;
+    menu.trechos = [];
+    for (const achado of modelo.matchAll(CHAVE)) {
+      texto += modelo.slice(pos, achado.index);
+      const v = valorFinal(achado[1].toLowerCase()) ?? achado[0];
+      menu.trechos.push({ k: achado[1].toLowerCase(), bruto: achado[0], a: texto.length, b: texto.length + v.length });
+      texto += v;
+      pos = achado.index + achado[0].length;
     }
+    menu.final.value = menu.textoAntes = texto + modelo.slice(pos);
+    marcarEditado(false);
+  }
+
+  // O que falta ou não deu para ler volta a ser {chave} no texto
+  function aplicarCampo(k) {
+    const v = valorFinal(k);
+    let texto = menu.final.value, desvio = 0;
+    for (const t of menu.trechos) {
+      t.a += desvio; t.b += desvio;
+      if (t.k !== k) continue;
+      const novo = v ?? t.bruto;
+      texto = texto.slice(0, t.a) + novo + texto.slice(t.b);
+      desvio += novo.length - (t.b - t.a);
+      t.b = t.a + novo.length;
+    }
+    menu.final.value = menu.textoAntes = texto;
+  }
+
+  // Depois de cada edição à mão: acha o pedaço que mudou (termina no cursor) e acerta a posição
+  // dos trechos; trecho mexido por dentro sai da lista e o campo deixa de mudá-lo.
+  function acompanharEdicao() {
+    const antes = menu.textoAntes, agora = menu.final.value;
+    const menor = Math.min(antes.length, agora.length);
+    const limite = Math.min(menor, agora.length - menu.final.selectionEnd);
+    let fim = 0, ini = 0;
+    while (fim < limite && antes[antes.length - 1 - fim] === agora[agora.length - 1 - fim]) fim++;
+    while (ini < menor - fim && antes[ini] === agora[ini]) ini++;
+    const fimAntes = antes.length - fim, desvio = agora.length - antes.length;
+    menu.trechos = menu.trechos.filter((t) => {
+      if (t.b <= ini) return true;
+      if (t.a >= fimAntes) { t.a += desvio; t.b += desvio; return true; }
+      return false;
+    });
+    menu.textoAntes = agora;
+  }
+
+  // Depois de mexer num campo: a dica do dinheiro, a altura da caixa e o que falta
+  function atualizar() {
     for (const [k, dica] of Object.entries(menu.dicas)) {
       const v = valorFinal(k);
       dica.textContent = v !== null ? ` · sai como ${v}` : menu.valores[k].trim() ? ' · não entendi o valor' : ' · em reais';
       dica.className = v === null && menu.valores[k].trim() ? 'erro' : 'auto';
     }
+    ajustarAltura();
     conferir();
   }
 
   function marcarEditado(sim) {
     menu.editado = sim;
-    menu.caixa.classList.toggle('editado', sim);
-    for (const entrada of Object.values(menu.entradas)) entrada.readOnly = sim;
     menu.rotuloTexto.className = sim ? 'editada' : '';
     menu.rotuloTexto.textContent = sim
-      ? 'Mensagem editada à mão — vai assim; os campos acima travaram'
+      ? 'Mensagem editada à mão — os campos acima continuam valendo'
       : 'Mensagem — dá para editar o texto antes de enviar';
     menu.refazer.hidden = !sim;
   }
@@ -461,21 +504,19 @@
 
   function conferir() {
     const faltam = faltando();
-    let aviso, erro = false;
-    if (!menu.final.value.trim()) {
-      aviso = 'A mensagem está vazia.';
-    } else if (menu.editado) {
-      aviso = faltam.length ? `Falta trocar no texto: ${faltam.map(k => `{${k}}`).join(', ')}` : '';
-    } else {
-      const ilegiveis = faltam.filter(k => (menu.valores[k] || '').trim());
-      const vazios = faltam.filter(k => !(menu.valores[k] || '').trim());
-      erro = ilegiveis.length > 0;
-      aviso = [vazios.length ? `Falta preencher: ${vazios.map(k => `{${k}}`).join(', ')}` : '',
-               ilegiveis.length ? `Valor que não entendi: ${ilegiveis.map(k => `{${k}}`).join(', ')} (ex.: 1.234,56)` : '']
-        .filter(Boolean).join(' · ');
-    }
+    const texto = menu.final.value;
+    // {chave} que o campo ainda controla (preencher resolve) × escrita ou deixada à mão no texto
+    const doCampo = k => menu.trechos.some(t => t.k === k && texto.slice(t.a, t.b) === t.bruto);
+    const vazios = faltam.filter(k => doCampo(k) && !(menu.valores[k] || '').trim());
+    const ilegiveis = faltam.filter(k => doCampo(k) && (menu.valores[k] || '').trim());
+    const soltos = faltam.filter(k => !doCampo(k));
+    const chaves = ks => ks.map(k => `{${k}}`).join(', ');
+    const aviso = !texto.trim() ? 'A mensagem está vazia.'
+      : [vazios.length ? `Falta preencher: ${chaves(vazios)}` : '',
+         ilegiveis.length ? `Valor que não entendi: ${chaves(ilegiveis)} (ex.: 1.234,56)` : '',
+         soltos.length ? `Troque ou apague no texto: ${chaves(soltos)}` : ''].filter(Boolean).join(' · ');
     menu.botao.disabled = !podeEnviar();
-    avisar(aviso, erro);
+    avisar(aviso, ilegiveis.length > 0 || soltos.length > 0);
   }
 
   const podeEnviar = () => !enviando && !!menu.chatId && !!menu.final.value.trim() && !faltando().length;
@@ -554,7 +595,7 @@
     }
     if (e.key === 'Tab') {
       // O foco fica no menu: fora dele, o que se digitasse iria para o ChatGuru, atrás
-      const focaveis = [...menu.raiz.querySelectorAll('input:not([readonly]), textarea, button:not(:disabled):not([hidden])')];
+      const focaveis = [...menu.raiz.querySelectorAll('input, textarea, button:not(:disabled):not([hidden])')];
       const n = focaveis.length;
       if (n) {
         parar(e);
