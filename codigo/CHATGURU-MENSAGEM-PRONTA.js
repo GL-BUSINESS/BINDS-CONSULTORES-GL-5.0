@@ -8,7 +8,7 @@
   // As mensagens NÃO moram aqui: são cadastradas no painel-dev (Tampermonkeys › Mensagens do F2)
   // e lidas sem login a cada F2. Mudou lá, vale no próximo F2 — sem atualizar este script.
   const LISTA_URL = 'https://gateway-s2.glcapital-ti.net/mensagens-prontas';
-  const TECLA_MENU = 'F2';
+  const TECLA_MENU = 'F3';
 
   // Última lista boa: o F2 abre na hora com ela, e ela segura o menu se o painel cair
   const CACHE_KEY = 'mp_lista';
