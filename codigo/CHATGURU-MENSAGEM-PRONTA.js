@@ -18,7 +18,7 @@
   // Placeholder: {chave}. A mesma expressão do painel (PLACEHOLDER em app/mensagens_prontas.py)
   const CHAVE = /\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
   // Os que o script preenche sozinho; o consultor confere e pode corrigir. O resto ele digita.
-  const AUTOMATICOS = ['nome', 'primeiro_nome', 'consultor', 'saudacao'];
+  const AUTOMATICOS = ['nome', 'primeiro_nome', 'consultor', 'vendedor', 'saudacao'];
   // Toda chave que começa com "valor" ({valor}, {valor_parcela}…) é dinheiro: o consultor digita
   // o número como quiser e sai "R$ 1.234,56". A mesma regra do painel (DINHEIRO lá).
   const eDinheiro = k => k.startsWith('valor');
@@ -123,6 +123,17 @@
     return cabecalho ? limparNome(cabecalho.textContent) : '';
   }
 
+  // Quem está logado: o link do topo é "Nome Completo | Empresa" — {vendedor} é o que vem antes
+  // do "|" (elemento <a href="/user/me" class="… text-muted2 …"> do #nav_top, pedido do dono em
+  // 02/10/2026). Volta '' se o layout mudar: o consultor digita.
+  function nomeDoVendedor() {
+    for (const a of document.querySelectorAll('#nav_top a[href="/user/me"]')) {
+      const nome = a.textContent.replace(/\s+/g, ' ').split('|')[0].trim();
+      if (nome) return nome.slice(0, 80);
+    }
+    return '';
+  }
+
   function nomeDoLead(chatId) {
     return nomeNoCabecalho() || nomeNoApp(chatId) || nomeNaTela(chatId);
   }
@@ -185,6 +196,7 @@
       nome,
       primeiro_nome: primeiroNome(nome),
       consultor: lerLocal(CONSULTOR_KEY) || '',
+      vendedor: nomeDoVendedor(),
     };
   }
 
