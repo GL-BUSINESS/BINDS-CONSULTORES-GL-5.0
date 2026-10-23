@@ -1,6 +1,8 @@
 # BINDS-CONSULTORES-GL-5.0
 
-Userscripts (Tampermonkey) do ChatGuru da equipe.
+Userscripts (Tampermonkey) do ChatGuru da equipe — e, desde 23/10/2026, um do **New Corban**
+(`NEWCORBAN-COLETOR`: a aba ociosa do consultor completa cadastros do Cliente 360 com a
+sessão que a própria página já usa; nasce desligado, sem token nenhum).
 
 ## Como funciona desde 25/09/2026
 
@@ -23,6 +25,10 @@ consultores, logado com a conta de cada um. Por isso:
 - **deploy keys** seguem desligadas pela organização;
 - dar escrita a mais alguém (pessoa, time, app ou chave) é dar isso junto;
 - verificação em duas etapas ligada nas 3 contas.
+
+Desde 23/10/2026 isso vale **também para o New Corban**: o `NEWCORBAN-COLETOR` roda na aba
+do bureau, com a sessão de consulta do consultor. Escrever aqui passou a alcançar os dois
+sites.
 
 ## Para mudar um script
 
