@@ -1,16 +1,12 @@
 # BINDS-CONSULTORES-GL-5.0
 
-Userscripts (Tampermonkey) do ChatGuru da equipe — e, desde 23/10/2026, um do **New Corban**
-(`NEWCORBAN-COLETOR`: a aba ociosa do consultor completa cadastros do Cliente 360 com a
-sessão que a própria página já usa).
+Userscripts (Tampermonkey) do ChatGuru da equipe.
 
-⚠ O `NEWCORBAN-COLETOR.user.js` daqui é **molde e não faz nada**: ele nasce com o token vazio e
-volta na primeira linha. O arquivo que se instala em cada PC é gerado pelo TI
-(`ferramentas/chave.py` do coletor-api), tem o token daquele consultor dentro e **não** tem
-`@updateURL`. Motivo: este repositório é público, e token em arquivo público é token vazado — com
-ele qualquer pessoa puxaria CPF da fila do Cliente 360 e escreveria nele. O CÓDIGO
-(`codigo/NEWCORBAN-COLETOR.js`) continua se atualizando sozinho como os outros; só o segredo fica
-fora dele. Esse script também **não mostra nada na tela** do consultor.
+Em 23/10/2026 entrou aqui um script do **New Corban** (`NEWCORBAN-COLETOR`) e **saiu no mesmo
+dia**: ele roda na aba do bureau, com a sessão de consulta do consultor, e quem escreve neste
+repositório passaria a alcançar essa sessão. O código dele agora é servido pelo gateway da GL,
+autenticado por consultor, e vive no repositório privado `GL-BUSINESS/coletor-api`. Este
+repositório voltou a ser só do ChatGuru.
 
 ## Como funciona desde 25/09/2026
 
@@ -33,10 +29,6 @@ consultores, logado com a conta de cada um. Por isso:
 - **deploy keys** seguem desligadas pela organização;
 - dar escrita a mais alguém (pessoa, time, app ou chave) é dar isso junto;
 - verificação em duas etapas ligada nas 3 contas.
-
-Desde 23/10/2026 isso vale **também para o New Corban**: o `NEWCORBAN-COLETOR` roda na aba
-do bureau, com a sessão de consulta do consultor. Escrever aqui passou a alcançar os dois
-sites.
 
 ## Para mudar um script
 
