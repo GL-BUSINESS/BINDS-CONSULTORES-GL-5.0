@@ -2,7 +2,15 @@
 
 Userscripts (Tampermonkey) do ChatGuru da equipe — e, desde 23/10/2026, um do **New Corban**
 (`NEWCORBAN-COLETOR`: a aba ociosa do consultor completa cadastros do Cliente 360 com a
-sessão que a própria página já usa; nasce desligado, sem token nenhum).
+sessão que a própria página já usa).
+
+⚠ O `NEWCORBAN-COLETOR.user.js` daqui é **molde e não faz nada**: ele nasce com o token vazio e
+volta na primeira linha. O arquivo que se instala em cada PC é gerado pelo TI
+(`ferramentas/chave.py` do coletor-api), tem o token daquele consultor dentro e **não** tem
+`@updateURL`. Motivo: este repositório é público, e token em arquivo público é token vazado — com
+ele qualquer pessoa puxaria CPF da fila do Cliente 360 e escreveria nele. O CÓDIGO
+(`codigo/NEWCORBAN-COLETOR.js`) continua se atualizando sozinho como os outros; só o segredo fica
+fora dele. Esse script também **não mostra nada na tela** do consultor.
 
 ## Como funciona desde 25/09/2026
 

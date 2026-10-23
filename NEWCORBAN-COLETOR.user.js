@@ -18,8 +18,19 @@
 // própria página usa no apiv2. Assim não depende de a gente saber hoje qual subdomínio a tela de
 // consulta deles vai usar amanhã.
 //
-// NASCE DESLIGADO: sem o token que o TI entrega a cada consultor, ele não pede CPF nenhum. Ligar e
-// desligar é no selo do canto da tela, pelo próprio consultor.
+// ESTA CÓPIA (a do repositório) É MOLDE E NÃO FAZ NADA: `TOKEN` vazio e ele volta na primeira
+// linha, sem nem baixar o código. O arquivo que se instala em cada PC é gerado por
+// `ferramentas/chave.py <consultor>` do coletor-api, com o token daquela pessoa dentro e SEM
+// @updateURL/@downloadURL — senão o Tampermonkey trocaria o arquivo do PC por este, sem token.
+//
+// POR QUE O TOKEN VEM POR AQUI e não no código: este repositório é PÚBLICO (é assim que o
+// carregador baixa o código sem credencial). Token em arquivo público é token vazado, e com ele
+// qualquer pessoa puxaria CPF da nossa fila e escreveria no Cliente 360. O código continua
+// atualizando sozinho; só o segredo fica fora dele.
+//
+// NADA NA TELA (23/10/2026, decisão do dono): nem selo, nem aviso, nem log — para o consultor a
+// aba é a mesma de sempre. Quem desliga alguém é o servidor (a linha dele em
+// /opt/coletor-api/consultores). Diagnóstico de TI: `localStorage.gl_coletor_log = 'on'` + F5.
 //
 // SEM ASSINATURA, decisão do dono em 25/09/2026, "desde que só essas 3 contas possam alterar":
 // quem escreve na main deste repositório roda código no New Corban de todos os consultores, com a
@@ -30,6 +41,17 @@
   'use strict';
 
   const NOME = 'NEWCORBAN-COLETOR';
+
+  /* Preenchidos por ferramentas/chave.py na cópia de cada PC. Vazios aqui, de propósito. */
+  const TOKEN = '';
+  const CONSULTOR = '';
+
+  if (!TOKEN) return;   // molde do repositório: nem baixa o código, nem mexe na página
+
+  const LOG = (() => {
+    try { return localStorage.getItem('gl_coletor_log') === 'on'; } catch (e) { return false; }
+  })();
+  const anotar = (...a) => { if (LOG) console.log(`[gl] ${NOME}:`, ...a); };
   const URL = `https://raw.githubusercontent.com/GL-BUSINESS/BINDS-CONSULTORES-GL-5.0/main/codigo/${NOME}.js`;
   // A última versão que rodou bem: vale se o GitHub não responder
   const GUARDADO = `gl_codigo_${NOME}`;
@@ -47,19 +69,27 @@
     try {
       const r = await fetch(URL, { cache: 'no-store', credentials: 'omit', signal: ctl.signal });
       if (r.ok) return await r.text();
-      console.warn(`[gl] ${NOME}: o GitHub respondeu HTTP ${r.status}`);
+      anotar(`o GitHub respondeu HTTP ${r.status}`);
     } catch (e) {
-      console.warn(`[gl] ${NOME}: não baixei o código do GitHub`, e);
+      anotar('não baixei o código do GitHub', e);
     } finally {
       clearTimeout(prazo);
     }
     return null;
   }
 
-  // eval indireto: roda no escopo global da página, como o script instalado rodava
+  /* `new Function` em vez do eval indireto de antes: o token entra como PARÂMETRO e fica no
+   * escopo da função. Em `window` (ou no localStorage) o JS da própria página poderia lê-lo.
+   * Precisa do mesmo `unsafe-eval` que o eval já precisava — e que a página permite, senão
+   * nenhum dos carregadores dos BINDS teria funcionado até hoje.
+   *
+   * O código guardado no navegador também recebe o token. Quem conseguisse escrever nesse
+   * cache já estaria rodando JS nesta página com a sessão do bureau do consultor — que vale
+   * muito mais do que o nosso token. */
   function rodar(codigo, origem) {
-    (0, eval)(`${codigo}\n//# sourceURL=gl-${NOME}.js`);
-    console.log(`[gl] ${NOME}: rodando o código ${origem}`);
+    // eslint-disable-next-line no-new-func
+    new Function('TOKEN', 'CONSULTOR', `${codigo}\n//# sourceURL=gl-${NOME}.js`)(TOKEN, CONSULTOR);
+    anotar(`rodando o código ${origem}`);
   }
 
   (async () => {
@@ -70,7 +100,7 @@
         guardar(novo);
         return;
       } catch (e) {
-        console.error(`[gl] ${NOME}: o código do GitHub falhou`, e);
+        anotar('o código do GitHub falhou', e);
         // Erro de sintaxe não chega a rodar nada, então dá para cair na versão guardada.
         // Erro no meio da execução pode já ter ligado metade do script: rodar a velha em
         // cima duplicaria o laço.
@@ -82,7 +112,7 @@
       try {
         rodar(velho, 'guardado neste navegador');
       } catch (e) {
-        console.error(`[gl] ${NOME}: o código guardado também falhou`, e);
+        anotar('o código guardado também falhou', e);
       }
     }
     // Sem aviso vermelho na tela, ao contrário dos carregadores do ChatGuru: lá o script

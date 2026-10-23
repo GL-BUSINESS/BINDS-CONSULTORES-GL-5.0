@@ -12,22 +12,45 @@
  *    `rate_limited` para o laço desta aba até a hora virar;
  *  - não mexe na tela: nada de clique, nada de preenchimento. Só fetch.
  *
- * NASCE DESLIGADA. Precisa do token do coletor (o NOSSO, não o do New Corban), que o TI
- * entrega a cada consultor e que se cola no selo do canto. Desligar: o mesmo selo.
+ * NADA NA TELA (23/10/2026, decisão do dono): nenhum selo, nenhum painel, nenhum log. A
+ * aba não muda em nada para o consultor. Quem mostra o que ela fez é a tela /coletor do
+ * painel, por consultor. Diagnóstico de TI nesta máquina:
+ * `localStorage.gl_coletor_log = 'on'` + F5 liga o log no console e expõe
+ * `window.__glColetorEstado`.
+ *
+ * O TOKEN NÃO MORA AQUI. Ele é INJETADO pelo carregador instalado em cada PC. Este arquivo
+ * é público — o repositório dos BINDS é público, é assim que o carregador o baixa sem
+ * credencial nenhuma —, e segredo em arquivo público é segredo vazado: com o token qualquer
+ * pessoa puxaria CPF da nossa fila (`/coletor/proximo` responde com um) e escreveria no
+ * Cliente 360 (`/coletor/resultado`). Sem token injetado, o carregador nem chega a rodar
+ * este código.
+ *
+ * DESLIGAR alguém é no SERVIDOR: apagar a linha dele em /opt/coletor-api/consultores (vale
+ * na próxima chamada, sem restart) ou COLETOR_LIGADO=false para todos.
  *
  * Carregado por NEWCORBAN-COLETOR.user.js — editar ESTE arquivo vale no próximo F5.
  */
 (function () {
   'use strict';
 
-  const VERSION = '1.0';
+  const VERSION = '2.0';
   const BASE = 'https://gateway-s2.glcapital-ti.net';
   const APIV2 = 'https://apiv2.newcorban.com.br/api/v2/external-data/queries';
   const ALVO_APIV2 = 'apiv2.newcorban.com.br';
 
-  /* localStorage: só preferência desta máquina. O token do coletor é por pessoa. */
-  const CHAVE_TOKEN = 'gl_coletor_token';
-  const CHAVE_LIGADO = 'gl_coletor_ligado';
+  /* O token do coletor e o id do consultor vêm INJETADOS pelo carregador deste PC (ver o
+   * cabeçalho). Ficam no escopo desta função: não vão para `window` nem para o
+   * localStorage, de onde o JS da própria página poderia lê-los. */
+  const TOKEN_COLETOR = (typeof TOKEN === 'string' ? TOKEN : '').trim();
+  const CONSULTOR_ID = ((typeof CONSULTOR === 'string' ? CONSULTOR : '').trim() || 'aba');
+
+  /* Diagnóstico de TI nesta máquina. NÃO é liga/desliga: esse é do servidor. */
+  const LOG = (() => {
+    try { return localStorage.getItem('gl_coletor_log') === 'on'; } catch (e) { return false; }
+  })();
+  function anotar() {
+    if (LOG) console.log.apply(console, ['[gl] coletor'].concat([].slice.call(arguments)));
+  }
 
   const OCIOSO_S = 45;        // sem interação do consultor para a aba ser considerada ociosa
   const HEARTBEAT_S = 30;     // POST /coletor/online
@@ -126,7 +149,7 @@
         let chave;
         let bruto;
         try { chave = loja.key(i); bruto = loja.getItem(chave); } catch (e) { continue; }
-        if (!bruto || chave === CHAVE_TOKEN) continue;
+        if (!bruto) continue;
         if (jwtValido(bruto)) return { valor: bruto, chave };
         if (bruto[0] === '{' || bruto[0] === '[') {
           try {
@@ -175,7 +198,7 @@
 
   /* ------------------------------------------------------------------ o nosso servidor */
   function nossoToken() {
-    try { return localStorage.getItem(CHAVE_TOKEN) || ''; } catch (e) { return ''; }
+    return TOKEN_COLETOR;
   }
 
   async function nosso(caminho, opcoes) {
@@ -251,7 +274,7 @@
 
     estado.emVoo = true;
     try {
-      const r = await nosso('/coletor/proximo?consultor=aba');
+      const r = await nosso('/coletor/proximo?consultor=' + encodeURIComponent(CONSULTOR_ID));
       if (r.status === 401) {
         estado.parado = 'o token do coletor não é válido. Avise o TI.';
         return;
@@ -311,7 +334,7 @@
       estado.esperarAte = Date.now() + 60000;
     } finally {
       estado.emVoo = false;
-      pintar();
+      anotar(estado.motivo);
     }
   }
 
@@ -322,91 +345,17 @@
     try { await nosso('/coletor/online', { method: 'POST' }); } catch (e) { /* silêncio */ }
   }
 
+  /* Sem selo não existe liga/desliga local: ter o token DESTE PC é estar ligada. Quem
+   * desliga é o servidor — a linha do consultor apagada (401 na chamada seguinte, e o laço
+   * para de vez) ou COLETOR_LIGADO=false (503 + Retry-After, e ela só volta a bater). */
   function ligado() {
-    try { return localStorage.getItem(CHAVE_LIGADO) === 'on'; } catch (e) { return false; }
+    return Boolean(TOKEN_COLETOR);
   }
 
-  /* ------------------------------------------------------------------ o selo
-   * Existe para o consultor SABER e poder desligar. É a parte do consentimento que o
-   * software consegue garantir: nada acontece escondido nesta aba.                     */
-  let selo;
-  let painel;
+  /* O estado fica alcançável só com a chave de diagnóstico ligada: em PC de consultor não
+   * há nada em `window` além da trava de carga dupla. */
+  if (LOG) window.__glColetorEstado = estado;
 
-  function pintar() {
-    if (!selo) return;
-    const total = estado.contagem.hit + estado.contagem.miss;
-    const cor = estado.parado ? '#b91c1c' : (ligado() ? '#15803d' : '#475569');
-    selo.style.background = cor;
-    selo.textContent = 'GL coletor · ' + (ligado() ? total + ' hoje' : 'desligado');
-    selo.title = estado.parado || estado.motivo;
-    if (painel && painel.style.display !== 'none') {
-      painel.querySelector('[data-gl=estado]').textContent =
-        (estado.parado || estado.motivo) + ' · ' + estado.contagem.hit + ' completados, '
-        + estado.contagem.miss + ' sem dado, ' + estado.contagem.erro + ' falhas';
-      painel.querySelector('[data-gl=login]').textContent =
-        estado.tokenApp ? ('login desta página: ' + estado.ondeAchou) : 'login desta página: ainda não vi';
-      painel.querySelector('[data-gl=liga]').textContent = ligado() ? 'Desligar' : 'Ligar';
-    }
-  }
-
-  function montarSelo() {
-    selo = document.createElement('button');
-    Object.assign(selo.style, {
-      position: 'fixed', right: '16px', bottom: '16px', zIndex: 2147482000,
-      padding: '6px 10px', border: 'none', borderRadius: '999px', color: '#fff',
-      font: '12px/1.2 system-ui, sans-serif', cursor: 'pointer', opacity: '0.85',
-      boxShadow: '0 2px 8px rgba(0,0,0,.25)',
-    });
-    selo.addEventListener('click', () => {
-      painel.style.display = painel.style.display === 'none' ? 'block' : 'none';
-      pintar();
-    });
-
-    painel = document.createElement('div');
-    Object.assign(painel.style, {
-      position: 'fixed', right: '16px', bottom: '56px', zIndex: 2147482000, width: '320px',
-      padding: '12px', background: '#0f172a', color: '#e2e8f0', borderRadius: '10px',
-      font: '12px/1.45 system-ui, sans-serif', display: 'none',
-      boxShadow: '0 8px 24px rgba(0,0,0,.35)',
-    });
-    painel.innerHTML = [
-      '<div style="font-weight:600;margin-bottom:6px">Coletor do Cliente 360 · ', VERSION, '</div>',
-      '<div style="margin-bottom:8px">Quando esta aba fica <b>parada</b>, ela completa cadastros ',
-      'do 360 consultando o New Corban com o seu login — no máximo um CPF a cada ',
-      String(ESPERA_PADRAO_S), ' s. Se você estiver usando a aba, ela não consulta. ',
-      'Pode desligar quando quiser.</div>',
-      '<div data-gl="estado" style="margin-bottom:6px;color:#93c5fd"></div>',
-      '<div data-gl="login" style="margin-bottom:8px;color:#94a3b8"></div>',
-      '<button data-gl="liga" style="padding:5px 10px;margin-right:6px"></button>',
-      '<button data-gl="token" style="padding:5px 10px">Token do TI</button>',
-    ].join('');
-    painel.querySelector('[data-gl=liga]').addEventListener('click', () => {
-      try {
-        if (ligado()) localStorage.removeItem(CHAVE_LIGADO);
-        else localStorage.setItem(CHAVE_LIGADO, 'on');
-      } catch (e) { /* sem storage */ }
-      estado.parado = '';
-      estado.motivo = ligado() ? 'ligada' : 'desligada';
-      pintar();
-    });
-    painel.querySelector('[data-gl=token]').addEventListener('click', () => {
-      const atual = nossoToken();
-      const novo = window.prompt('Cole o token que o TI entregou (vazio apaga):', atual);
-      if (novo === null) return;
-      try {
-        if (novo.trim()) localStorage.setItem(CHAVE_TOKEN, novo.trim());
-        else localStorage.removeItem(CHAVE_TOKEN);
-      } catch (e) { /* sem storage */ }
-      estado.parado = '';
-      pintar();
-    });
-
-    (document.body || document.documentElement).appendChild(selo);
-    (document.body || document.documentElement).appendChild(painel);
-    pintar();
-  }
-
-  montarSelo();
   setInterval(() => { bater(); umaVolta(); }, TICK_MS);
-  console.log('[gl] NEWCORBAN-COLETOR ' + VERSION + ': selo no canto; nada consulta sem o token do TI');
+  anotar(VERSION, 'rodando como', CONSULTOR_ID);
 })();
